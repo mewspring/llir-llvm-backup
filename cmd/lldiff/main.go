@@ -46,7 +46,7 @@ func main() {
 			log.Fatalf("%q: unable to read file; %v", path, err)
 		}
 		want := string(buf)
-		module, err := asm.ParseString(want)
+		module, err := asm.ParseString(path, want)
 		if err != nil {
 			log.Fatalf("%q: unable to parse module; %v", path, err)
 		}

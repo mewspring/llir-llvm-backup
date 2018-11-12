@@ -1,8 +1,3 @@
-// === [ Vector expressions ] ==================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#vector-operations
-
 package constant
 
 import (
@@ -11,166 +6,175 @@ import (
 	"github.com/llir/llvm/ir/types"
 )
 
-// --- [ extractelement ] ------------------------------------------------------
+// --- [ Vector expressions ] --------------------------------------------------
 
-// ExprExtractElement represents an extractelement expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#extractelement-instruction
+// ~~~ [ extractelement ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// ExprExtractElement is an LLVM IR extractelement expression.
 type ExprExtractElement struct {
-	// Type of the constant expression.
-	Typ types.Type
 	// Vector.
 	X Constant
-	// Index.
+	// Element index.
 	Index Constant
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type
 }
 
 // NewExtractElement returns a new extractelement expression based on the given
-// vector and index.
+// vector and element index.
 func NewExtractElement(x, index Constant) *ExprExtractElement {
-	t, ok := x.Type().(*types.VectorType)
-	if !ok {
-		panic(fmt.Errorf("invalid vector type; expected *types.VectorType, got %T", x.Type()))
-	}
-	return &ExprExtractElement{
-		Typ:   t.Elem,
-		X:     x,
-		Index: index,
-	}
+	e := &ExprExtractElement{X: x, Index: index}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprExtractElement) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
 }
 
 // Type returns the type of the constant expression.
-func (expr *ExprExtractElement) Type() types.Type {
-	return expr.Typ
+func (e *ExprExtractElement) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		t, ok := e.X.Type().(*types.VectorType)
+		if !ok {
+			panic(fmt.Errorf("invalid vector type; expected *types.VectorType, got %T", e.X.Type()))
+		}
+		e.Typ = t.ElemType
+	}
+	return e.Typ
 }
 
-// Ident returns the string representation of the constant expression.
-func (expr *ExprExtractElement) Ident() string {
-	return fmt.Sprintf("extractelement (%s %s, %s %s)",
-		expr.X.Type(),
-		expr.X.Ident(),
-		expr.Index.Type(),
-		expr.Index.Ident())
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprExtractElement) Ident() string {
+	// 'extractelement' '(' X=TypeConst ',' Index=TypeConst ')'
+	return fmt.Sprintf("extractelement (%s, %s)", e.X, e.Index)
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprExtractElement) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprExtractElement) Simplify() Constant {
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprExtractElement) Simplify() Constant {
 	panic("not yet implemented")
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprExtractElement) MetadataNode() {}
+// ~~~ [ insertelement ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// --- [ insertelement ] -------------------------------------------------------
-
-// ExprInsertElement represents an insertelement expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#insertelement-instruction
+// ExprInsertElement is an LLVM IR insertelement expression.
 type ExprInsertElement struct {
 	// Vector.
 	X Constant
 	// Element to insert.
 	Elem Constant
-	// Index.
+	// Element index.
 	Index Constant
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type
 }
 
 // NewInsertElement returns a new insertelement expression based on the given
-// vector, element and index.
+// vector, element and element index.
 func NewInsertElement(x, elem, index Constant) *ExprInsertElement {
-	return &ExprInsertElement{
-		X:     x,
-		Elem:  elem,
-		Index: index,
-	}
+	e := &ExprInsertElement{X: x, Elem: elem, Index: index}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprInsertElement) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
 }
 
 // Type returns the type of the constant expression.
-func (expr *ExprInsertElement) Type() types.Type {
-	return expr.X.Type()
+func (e *ExprInsertElement) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		t, ok := e.X.Type().(*types.VectorType)
+		if !ok {
+			panic(fmt.Errorf("invalid vector type; expected *types.VectorType, got %T", e.X.Type()))
+		}
+		e.Typ = t
+	}
+	return e.Typ
 }
 
-// Ident returns the string representation of the constant expression.
-func (expr *ExprInsertElement) Ident() string {
-	return fmt.Sprintf("insertelement (%s %s, %s %s, %s %s)",
-		expr.X.Type(),
-		expr.X.Ident(),
-		expr.Elem.Type(),
-		expr.Elem.Ident(),
-		expr.Index.Type(),
-		expr.Index.Ident())
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprInsertElement) Ident() string {
+	// 'insertelement' '(' X=TypeConst ',' Elem=TypeConst ',' Index=TypeConst ')'
+	return fmt.Sprintf("insertelement (%s, %s, %s)", e.X, e.Elem, e.Index)
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprInsertElement) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprInsertElement) Simplify() Constant {
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprInsertElement) Simplify() Constant {
 	panic("not yet implemented")
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprInsertElement) MetadataNode() {}
+// ~~~ [ shufflevector ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// --- [ shufflevector ] ------------------------------------------------------
-
-// ExprShuffleVector represents an shufflevector expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#shufflevector-instruction
+// ExprShuffleVector is an LLVM IR shufflevector expression.
 type ExprShuffleVector struct {
-	// Vector 1.
-	X Constant
-	// Vector 2.
-	Y Constant
+	// Vectors.
+	X, Y Constant
 	// Shuffle mask.
 	Mask Constant
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type
 }
 
 // NewShuffleVector returns a new shufflevector expression based on the given
 // vectors and shuffle mask.
 func NewShuffleVector(x, y, mask Constant) *ExprShuffleVector {
-	return &ExprShuffleVector{
-		X:    x,
-		Y:    y,
-		Mask: mask,
-	}
+	e := &ExprShuffleVector{X: x, Y: y, Mask: mask}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprShuffleVector) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
 }
 
 // Type returns the type of the constant expression.
-func (expr *ExprShuffleVector) Type() types.Type {
-	return expr.Mask.Type()
+func (e *ExprShuffleVector) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		xType, ok := e.X.Type().(*types.VectorType)
+		if !ok {
+			panic(fmt.Errorf("invalid vector type; expected *types.VectorType, got %T", e.X.Type()))
+		}
+		maskType, ok := e.Mask.Type().(*types.VectorType)
+		if !ok {
+			panic(fmt.Errorf("invalid vector type; expected *types.VectorType, got %T", e.Mask.Type()))
+		}
+		e.Typ = types.NewVector(maskType.Len, xType.ElemType)
+	}
+	return e.Typ
 }
 
-// Ident returns the string representation of the constant expression.
-func (expr *ExprShuffleVector) Ident() string {
-	return fmt.Sprintf("shufflevector (%s %s, %s %s, %s %s)",
-		expr.X.Type(),
-		expr.X.Ident(),
-		expr.Y.Type(),
-		expr.Y.Ident(),
-		expr.Mask.Type(),
-		expr.Mask.Ident())
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprShuffleVector) Ident() string {
+	// 'shufflevector' '(' X=TypeConst ',' Y=TypeConst ',' Mask=TypeConst ')'
+	return fmt.Sprintf("shufflevector (%s, %s, %s)", e.X, e.Y, e.Mask)
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprShuffleVector) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprShuffleVector) Simplify() Constant {
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprShuffleVector) Simplify() Constant {
 	panic("not yet implemented")
 }
-
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprShuffleVector) MetadataNode() {}

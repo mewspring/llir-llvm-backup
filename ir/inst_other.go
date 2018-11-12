@@ -1,354 +1,257 @@
-// === [ Other instructions ] ==================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#other-operations
-
 package ir
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/internal/enc"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/metadata"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
 
-// --- [ icmp ] ----------------------------------------------------------------
+// --- [ Other instructions ] --------------------------------------------------
 
-// InstICmp represents an icmp instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#icmp-instruction
+// ~~~ [ icmp ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstICmp is an LLVM IR icmp instruction.
 type InstICmp struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
-	// Type of the instruction.
-	Typ types.Type
-	// Integer predicate.
-	Pred IntPred
-	// Operands.
-	X, Y value.Value
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+	// Name of local variable associated with the result.
+	LocalName string
+	// Integer comparison predicate.
+	Pred enum.IPred
+	// Integer scalar or vector operands.
+	X, Y value.Value // integer scalar, pointer, integer vector or pointer vector.
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type // boolean or boolean vector
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
-// NewICmp returns a new icmp instruction based on the given integer predicate
-// and operands.
-func NewICmp(pred IntPred, x, y value.Value) *InstICmp {
-	var typ types.Type = types.I1
-	if t, ok := x.Type().(*types.VectorType); ok {
-		typ = types.NewVector(types.I1, t.Len)
-	}
-	return &InstICmp{
-		Typ:      typ,
-		Pred:     pred,
-		X:        x,
-		Y:        y,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+// NewICmp returns a new icmp instruction based on the given integer comparison
+// predicate and integer scalar or vector operands.
+func NewICmp(pred enum.IPred, x, y value.Value) *InstICmp {
+	inst := &InstICmp{Pred: pred, X: x, Y: y}
+	// Compute type.
+	inst.Type()
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstICmp) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstICmp) Type() types.Type {
+	// Cache type if not present.
+	if inst.Typ == nil {
+		switch xType := inst.X.Type().(type) {
+		case *types.IntType, *types.PointerType:
+			inst.Typ = types.I1
+		case *types.VectorType:
+			inst.Typ = types.NewVector(xType.Len, types.I1)
+		default:
+			panic(fmt.Errorf("invalid icmp operand type; expected *types.IntType, *types.PointerType or *types.VectorType, got %T", xType))
+		}
+	}
 	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstICmp) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstICmp) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstICmp) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstICmp) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstICmp) String() string {
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = icmp %s %s %s, %s%s",
-		inst.Ident(),
-		inst.Pred,
-		inst.X.Type(),
-		inst.X.Ident(),
-		inst.Y.Ident(),
-		md)
-}
-
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstICmp) GetParent() *BasicBlock {
-	return inst.Parent
-}
-
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstICmp) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
-}
-
-// IntPred represents the set of integer predicates of the icmp instruction.
-type IntPred int
-
-// Integer predicates.
-const (
-	IntEQ  IntPred = iota + 1 // eq: equal
-	IntNE                     // ne: not equal
-	IntUGT                    // ugt: unsigned greater than
-	IntUGE                    // uge: unsigned greater than or equal
-	IntULT                    // ult: unsigned less than
-	IntULE                    // ule: unsigned less than or equal
-	IntSGT                    // sgt: signed greater than
-	IntSGE                    // sge: signed greater than or equal
-	IntSLT                    // slt: signed less than
-	IntSLE                    // sle: signed less than or equal
-)
-
-// String returns the LLVM syntax representation of the integer predicate.
-func (pred IntPred) String() string {
-	m := map[IntPred]string{
-		IntEQ:  "eq",
-		IntNE:  "ne",
-		IntUGT: "ugt",
-		IntUGE: "uge",
-		IntULT: "ult",
-		IntULE: "ule",
-		IntSGT: "sgt",
-		IntSGE: "sge",
-		IntSLT: "slt",
-		IntSLE: "sle",
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstICmp) Def() string {
+	// 'icmp' Pred=IPred X=TypeValue ',' Y=Value Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "icmp %s %s, %s", inst.Pred, inst.X, inst.Y.Ident())
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
 	}
-	if s, ok := m[pred]; ok {
-		return s
-	}
-	return fmt.Sprintf("<unknown integer predicate %d>", int(pred))
+	return buf.String()
 }
 
-// --- [ fcmp ] ----------------------------------------------------------------
+// ~~~ [ fcmp ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// InstFCmp represents an fcmp instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#fcmp-instruction
+// InstFCmp is an LLVM IR fcmp instruction.
 type InstFCmp struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
-	// Type of the instruction.
-	Typ types.Type
-	// Floating-point predicate.
-	Pred FloatPred
-	// Operands.
-	X, Y value.Value
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+	// Name of local variable associated with the result.
+	LocalName string
+	// Floating-point comparison predicate.
+	Pred enum.FPred
+	// Floating-point scalar or vector operands.
+	X, Y value.Value // floating-point scalar or floating-point vector
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type // boolean or boolean vector
+	// (optional) Fast math flags.
+	FastMathFlags []enum.FastMathFlag
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewFCmp returns a new fcmp instruction based on the given floating-point
-// predicate and operands.
-func NewFCmp(pred FloatPred, x, y value.Value) *InstFCmp {
-	var typ types.Type = types.I1
-	if t, ok := x.Type().(*types.VectorType); ok {
-		typ = types.NewVector(types.I1, t.Len)
-	}
-	return &InstFCmp{
-		Typ:      typ,
-		Pred:     pred,
-		X:        x,
-		Y:        y,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+// comparison predicate and floating-point scalar or vector operands.
+func NewFCmp(pred enum.FPred, x, y value.Value) *InstFCmp {
+	inst := &InstFCmp{Pred: pred, X: x, Y: y}
+	// Compute type.
+	inst.Type()
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstFCmp) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstFCmp) Type() types.Type {
+	// Cache type if not present.
+	if inst.Typ == nil {
+		switch xType := inst.X.Type().(type) {
+		case *types.FloatType:
+			inst.Typ = types.I1
+		case *types.VectorType:
+			inst.Typ = types.NewVector(xType.Len, types.I1)
+		default:
+			panic(fmt.Errorf("invalid fcmp operand type; expected *types.FloatType or *types.VectorType, got %T", xType))
+		}
+	}
 	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstFCmp) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstFCmp) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstFCmp) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstFCmp) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstFCmp) String() string {
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = fcmp %s %s %s, %s%s",
-		inst.Ident(),
-		inst.Pred,
-		inst.X.Type(),
-		inst.X.Ident(),
-		inst.Y.Ident(),
-		md)
-}
-
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstFCmp) GetParent() *BasicBlock {
-	return inst.Parent
-}
-
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstFCmp) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
-}
-
-// FloatPred represents the set of floating-point predicates of the fcmp
-// instruction.
-type FloatPred int
-
-// Floating-point predicates.
-const (
-	FloatFalse FloatPred = iota + 1 // false: no comparison, always returns false
-	FloatOEQ                        // oeq: ordered and equal
-	FloatOGT                        // ogt: ordered and greater than
-	FloatOGE                        // oge: ordered and greater than or equal
-	FloatOLT                        // olt: ordered and less than
-	FloatOLE                        // ole: ordered and less than or equal
-	FloatONE                        // one: ordered and not equal
-	FloatORD                        // ord: ordered (no nans)
-	FloatUEQ                        // ueq: unordered or equal
-	FloatUGT                        // ugt: unordered or greater than
-	FloatUGE                        // uge: unordered or greater than or equal
-	FloatULT                        // ult: unordered or less than
-	FloatULE                        // ule: unordered or less than or equal
-	FloatUNE                        // une: unordered or not equal
-	FloatUNO                        // uno: unordered (either nans)
-	FloatTrue                       // true: no comparison, always returns true
-)
-
-// String returns the LLVM syntax representation of the floating-point
-// predicate.
-func (pred FloatPred) String() string {
-	m := map[FloatPred]string{
-		FloatFalse: "false",
-		FloatOEQ:   "oeq",
-		FloatOGT:   "ogt",
-		FloatOGE:   "oge",
-		FloatOLT:   "olt",
-		FloatOLE:   "ole",
-		FloatONE:   "one",
-		FloatORD:   "ord",
-		FloatUEQ:   "ueq",
-		FloatUGT:   "ugt",
-		FloatUGE:   "uge",
-		FloatULT:   "ult",
-		FloatULE:   "ule",
-		FloatUNE:   "une",
-		FloatUNO:   "uno",
-		FloatTrue:  "true",
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstFCmp) Def() string {
+	// 'fcmp' FastMathFlags=FastMathFlag* Pred=FPred X=TypeValue ',' Y=Value
+	// Metadata=(',' MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	buf.WriteString("fcmp")
+	for _, flag := range inst.FastMathFlags {
+		fmt.Fprintf(buf, " %s", flag)
 	}
-	if s, ok := m[pred]; ok {
-		return s
+	fmt.Fprintf(buf, " %s %s, %s", inst.Pred, inst.X, inst.Y.Ident())
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
 	}
-	return fmt.Sprintf("<unknown floating-point predicate %d>", int(pred))
+	return buf.String()
 }
 
-// --- [ phi ] -----------------------------------------------------------------
+// ~~~ [ phi ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// InstPhi represents a phi instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#phi-instruction
+// InstPhi is an LLVM IR phi instruction.
 type InstPhi struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
-	// Type of the instruction.
-	Typ types.Type
+	// Name of local variable associated with the result.
+	LocalName string
 	// Incoming values.
 	Incs []*Incoming
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type // type of incoming value
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewPhi returns a new phi instruction based on the given incoming values.
 func NewPhi(incs ...*Incoming) *InstPhi {
-	if len(incs) < 1 {
-		panic(fmt.Errorf("invalid number of incoming values; expected > 0, got %d", len(incs)))
-	}
-	typ := incs[0].X.Type()
-	return &InstPhi{
-		Typ:      typ,
-		Incs:     incs,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+	inst := &InstPhi{Incs: incs}
+	// Compute type.
+	inst.Type()
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstPhi) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstPhi) Type() types.Type {
+	// Cache type if not present.
+	if inst.Typ == nil {
+		inst.Typ = inst.Incs[0].X.Type()
+	}
 	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstPhi) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstPhi) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstPhi) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstPhi) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstPhi) String() string {
-	incs := &bytes.Buffer{}
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstPhi) Def() string {
+	// 'phi' Typ=Type Incs=(Inc separator ',')+ Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "phi %s ", inst.Typ)
 	for i, inc := range inst.Incs {
 		if i != 0 {
-			incs.WriteString(", ")
+			buf.WriteString(", ")
 		}
-		fmt.Fprintf(incs, "[ %s, %s ]",
-			inc.X.Ident(),
-			inc.Pred.Ident())
+		buf.WriteString(inc.String())
 	}
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = phi %s %s%s",
-		inst.Ident(),
-		inst.Type(),
-		incs,
-		md)
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
 }
 
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstPhi) GetParent() *BasicBlock {
-	return inst.Parent
-}
+// ___ [ Incoming value ] ______________________________________________________
 
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstPhi) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
-}
-
-// Incoming represents an incoming value of a phi instruction.
+// Incoming is an incoming value of a phi instruction.
 type Incoming struct {
 	// Incoming value.
 	X value.Value
@@ -359,218 +262,532 @@ type Incoming struct {
 // NewIncoming returns a new incoming value based on the given value and
 // predecessor basic block.
 func NewIncoming(x value.Value, pred *BasicBlock) *Incoming {
-	return &Incoming{
-		X:    x,
-		Pred: pred,
-	}
+	return &Incoming{X: x, Pred: pred}
 }
 
-// --- [ select ] --------------------------------------------------------------
+// String returns the string representation of the incoming value.
+func (inc *Incoming) String() string {
+	// '[' X=Value ',' Pred=LocalIdent ']'
+	return fmt.Sprintf("[ %s, %s ]", inc.X.Ident(), inc.Pred.Ident())
+}
 
-// InstSelect represents a select instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#select-instruction
+// ~~~ [ select ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstSelect is an LLVM IR select instruction.
 type InstSelect struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
+	// Name of local variable associated with the result.
+	LocalName string
 	// Selection condition.
-	Cond value.Value
+	Cond value.Value // boolean or boolean vector
 	// Operands.
 	X, Y value.Value
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewSelect returns a new select instruction based on the given selection
 // condition and operands.
 func NewSelect(cond, x, y value.Value) *InstSelect {
-	return &InstSelect{
-		Cond:     cond,
-		X:        x,
-		Y:        y,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+	inst := &InstSelect{Cond: cond, X: x, Y: x}
+	// Compute type.
+	inst.Type()
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstSelect) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstSelect) Type() types.Type {
-	return inst.X.Type()
+	// Cache type if not present.
+	if inst.Typ == nil {
+		inst.Typ = inst.X.Type()
+	}
+	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstSelect) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstSelect) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstSelect) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstSelect) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstSelect) String() string {
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = select %s %s, %s %s, %s %s%s",
-		inst.Ident(),
-		inst.Cond.Type(),
-		inst.Cond.Ident(),
-		inst.X.Type(),
-		inst.X.Ident(),
-		inst.Y.Type(),
-		inst.Y.Ident(),
-		md)
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstSelect) Def() string {
+	// 'select' Cond=TypeValue ',' X=TypeValue ',' Y=TypeValue Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "select %s, %s, %s", inst.Cond, inst.X, inst.Y)
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
 }
 
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstSelect) GetParent() *BasicBlock {
-	return inst.Parent
-}
+// ~~~ [ call ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstSelect) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
-}
-
-// --- [ call ] ----------------------------------------------------------------
-
-// InstCall represents a call instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#call-instruction
+// InstCall is an LLVM IR call instruction.
 type InstCall struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
+	// Name of local variable associated with the result.
+	LocalName string
 	// Callee.
-	//
-	// Callee may have one of the following underlying types.
-	//
-	//    *ir.Function
-	//    *types.Param
-	//    *constant.ExprBitCast
-	//    *ir.InstBitCast
-	//    *ir.InstLoad
-	//    *ir.InlineAsm
+	// TODO: specify the set of underlying types of Callee.
 	Callee value.Value
-	// Callee signature.
-	Sig *types.FuncType
 	// Function arguments.
+	//
+	// Arg has one of the following underlying types:
+	//    value.Value
+	//    *ir.Arg
+	//    TODO: add metadata value?
 	Args []value.Value
-	// Calling convention.
-	CallConv CallConv
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Type of result produced by the instruction, or function signature of the
+	// callee (as used when callee is variadic).
+	Typ types.Type
+	// (optional) Tail; zero if not present.
+	Tail enum.Tail
+	// (optional) Fast math flags.
+	FastMathFlags []enum.FastMathFlag
+	// (optional) Calling convention; zero if not present.
+	CallingConv enum.CallingConv
+	// (optional) Return attributes.
+	ReturnAttrs []ReturnAttribute
+	// (optional) Address space; zero if not present.
+	AddrSpace types.AddrSpace
+	// (optional) Function attributes.
+	FuncAttrs []FuncAttribute
+	// (optional) Operand bundles.
+	OperandBundles []OperandBundle
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewCall returns a new call instruction based on the given callee and function
 // arguments.
 //
-// The callee value may have one of the following underlying types.
-//
-//    *ir.Function
-//    *types.Param
-//    *constant.ExprBitCast
-//    *ir.InstBitCast
-//    *ir.InstLoad
+// TODO: specify the set of underlying types of callee.
 func NewCall(callee value.Value, args ...value.Value) *InstCall {
-	typ, ok := callee.Type().(*types.PointerType)
-	if !ok {
-		panic(fmt.Errorf("invalid callee type, expected *types.PointerType, got %T", callee.Type()))
-	}
-	sig, ok := typ.Elem.(*types.FuncType)
-	if !ok {
-		panic(fmt.Errorf("invalid callee signature type, expected *types.FuncType, got %T", typ.Elem))
-	}
-	return &InstCall{
-		Callee:   callee,
-		Sig:      sig,
-		Args:     args,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+	inst := &InstCall{Callee: callee, Args: args}
+	// Compute type.
+	inst.Type()
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstCall) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstCall) Type() types.Type {
-	return inst.Sig.Ret
+	// Cache type if not present.
+	if inst.Typ == nil {
+		t, ok := inst.Callee.Type().(*types.PointerType)
+		if !ok {
+			panic(fmt.Errorf("invalid callee type; expected *types.PointerType, got %T", inst.Callee.Type()))
+		}
+		sig, ok := t.ElemType.(*types.FuncType)
+		if !ok {
+			panic(fmt.Errorf("invalid callee type; expected *types.FuncType, got %T", t.ElemType))
+		}
+		if sig.Variadic {
+			inst.Typ = sig
+		} else {
+			inst.Typ = sig.RetType
+		}
+	}
+	if t, ok := inst.Typ.(*types.FuncType); ok {
+		return t.RetType
+	}
+	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstCall) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstCall) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstCall) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstCall) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstCall) String() string {
-	ident := &bytes.Buffer{}
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstCall) Def() string {
+	// Tailopt 'call' FastMathFlags=FastMathFlag* CallingConvopt
+	// ReturnAttrs=ReturnAttribute* AddrSpaceopt Typ=Type Callee=Value '(' Args
+	// ')' FuncAttrs=FuncAttribute* OperandBundles=('[' (OperandBundle separator
+	// ',')+ ']')? Metadata=(',' MetadataAttachment)+?
+	buf := &strings.Builder{}
 	if !inst.Type().Equal(types.Void) {
-		fmt.Fprintf(ident, "%s = ", inst.Ident())
+		fmt.Fprintf(buf, "%s = ", inst.Ident())
 	}
-	// Print callee signature instead of return type for variadic callees.
-	callconv := &bytes.Buffer{}
-	if inst.CallConv != CallConvNone {
-		fmt.Fprintf(callconv, " %s", inst.CallConv)
+	if inst.Tail != enum.TailNone {
+		fmt.Fprintf(buf, "%s ", inst.Tail)
 	}
-	sig := inst.Sig
-	ret := sig.Ret.String()
-	if sig.Variadic {
-		ret = sig.String()
+	buf.WriteString("call")
+	for _, flag := range inst.FastMathFlags {
+		fmt.Fprintf(buf, " %s", flag)
 	}
-	args := &bytes.Buffer{}
+	if inst.CallingConv != enum.CallingConvNone {
+		fmt.Fprintf(buf, " %s", callingConvString(inst.CallingConv))
+	}
+	for _, attr := range inst.ReturnAttrs {
+		fmt.Fprintf(buf, " %s", attr)
+	}
+	// Use function signature instead of return type for variadic functions.
+	typ := inst.Type()
+	if t, ok := inst.Typ.(*types.FuncType); ok {
+		if t.Variadic {
+			typ = t
+		}
+	}
+	fmt.Fprintf(buf, " %s %s(", typ, inst.Callee.Ident())
 	for i, arg := range inst.Args {
 		if i != 0 {
-			args.WriteString(", ")
+			buf.WriteString(", ")
 		}
-		fmt.Fprintf(args, "%s %s",
-			arg.Type(),
-			arg.Ident())
+		buf.WriteString(arg.String())
 	}
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%scall%s %s %s(%s)%s",
-		ident,
-		callconv,
-		ret,
-		inst.Callee.Ident(),
-		args,
-		md)
+	buf.WriteString(")")
+	for _, attr := range inst.FuncAttrs {
+		fmt.Fprintf(buf, " %s", attr)
+	}
+	if len(inst.OperandBundles) > 0 {
+		buf.WriteString("[")
+		for _, operandBundle := range inst.OperandBundles {
+			fmt.Fprintf(buf, " %s", operandBundle)
+		}
+		buf.WriteString("]")
+	}
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
 }
 
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstCall) GetParent() *BasicBlock {
-	return inst.Parent
+// ~~~ [ va_arg ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstVAArg is an LLVM IR va_arg instruction.
+type InstVAArg struct {
+	// Name of local variable associated with the result.
+	LocalName string
+	// Variable argument list.
+	ArgList value.Value
+	// Argument type.
+	ArgType types.Type
+
+	// extra.
+
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstCall) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
+// NewVAArg returns a new va_arg instruction based on the given variable
+// argument list and argument type.
+func NewVAArg(argList value.Value, argType types.Type) *InstVAArg {
+	return &InstVAArg{ArgList: argList, ArgType: argType}
 }
 
-// --- [ va_arg ] --------------------------------------------------------------
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstVAArg) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
+}
 
-// --- [ landingpad ] ----------------------------------------------------------
+// Type returns the type of the instruction.
+func (inst *InstVAArg) Type() types.Type {
+	return inst.ArgType
+}
 
-// --- [ catchpad ] ------------------------------------------------------------
+// Ident returns the identifier associated with the instruction.
+func (inst *InstVAArg) Ident() string {
+	return enc.Local(inst.LocalName)
+}
 
-// --- [ cleanuppad ] ----------------------------------------------------------
+// Name returns the name of the instruction.
+func (inst *InstVAArg) Name() string {
+	return inst.LocalName
+}
+
+// SetName sets the name of the instruction.
+func (inst *InstVAArg) SetName(name string) {
+	inst.LocalName = name
+}
+
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstVAArg) Def() string {
+	// 'va_arg' ArgList=TypeValue ',' ArgType=Type Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "va_arg %s, %s", inst.ArgList, inst.ArgType)
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
+}
+
+// ~~~ [ landingpad ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstLandingPad is an LLVM IR landingpad instruction.
+type InstLandingPad struct {
+	// Name of local variable associated with the result.
+	LocalName string
+	// Result type.
+	ResultType types.Type
+	// (optional) Cleanup landing pad.
+	Cleanup bool
+	// Filter and catch clauses; zero or more if Cleanup is true, otherwise one
+	// or more.
+	Clauses []*Clause
+
+	// extra.
+
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
+}
+
+// NewLandingPad returns a new landingpad instruction based on the given result
+// type and filter/catch clauses.
+func NewLandingPad(resultType types.Type, clauses ...*Clause) *InstLandingPad {
+	return &InstLandingPad{ResultType: resultType, Clauses: clauses}
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstLandingPad) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
+}
+
+// Type returns the type of the instruction.
+func (inst *InstLandingPad) Type() types.Type {
+	return inst.ResultType
+}
+
+// Ident returns the identifier associated with the instruction.
+func (inst *InstLandingPad) Ident() string {
+	return enc.Local(inst.LocalName)
+}
+
+// Name returns the name of the instruction.
+func (inst *InstLandingPad) Name() string {
+	return inst.LocalName
+}
+
+// SetName sets the name of the instruction.
+func (inst *InstLandingPad) SetName(name string) {
+	inst.LocalName = name
+}
+
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstLandingPad) Def() string {
+	// 'landingpad' ResultType=Type Cleanupopt Clauses=Clause* Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "landingpad %s", inst.ResultType)
+	if inst.Cleanup {
+		buf.WriteString("\n\t\tcleanup")
+	}
+	for _, clause := range inst.Clauses {
+		fmt.Fprintf(buf, "\n\t\t%s", clause)
+	}
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
+}
+
+// ___ [ Landingpad clause ] ___________________________________________________
+
+// Clause is a landingpad catch or filter clause.
+type Clause struct {
+	// Clause type (catch or filter).
+	Type enum.ClauseType
+	// Operand.
+	X value.Value
+}
+
+// NewClause returns a new landingpad clause based on the given clause type and
+// operand.
+func NewClause(clauseType enum.ClauseType, x value.Value) *Clause {
+	return &Clause{Type: clauseType, X: x}
+}
+
+// String returns the string representation of the landingpad clause.
+func (clause *Clause) String() string {
+	return fmt.Sprintf("%s %s", clause.Type, clause.X)
+}
+
+// ~~~ [ catchpad ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstCatchPad is an LLVM IR catchpad instruction.
+type InstCatchPad struct {
+	// Name of local variable associated with the result.
+	LocalName string
+	// Exception scope.
+	Scope *TermCatchSwitch // TODO: rename to From? rename to Within?
+	// Exception arguments.
+	//
+	// Arg has one of the following underlying types:
+	//    value.Value
+	//    TODO: add metadata value?
+	Args []value.Value
+
+	// extra.
+
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
+}
+
+// NewCatchPad returns a new catchpad instruction based on the given exception
+// scope and exception arguments.
+func NewCatchPad(scope *TermCatchSwitch, args ...value.Value) *InstCatchPad {
+	return &InstCatchPad{Scope: scope, Args: args}
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstCatchPad) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
+}
+
+// Type returns the type of the instruction.
+func (inst *InstCatchPad) Type() types.Type {
+	return types.Token
+}
+
+// Ident returns the identifier associated with the instruction.
+func (inst *InstCatchPad) Ident() string {
+	return enc.Local(inst.LocalName)
+}
+
+// Name returns the name of the instruction.
+func (inst *InstCatchPad) Name() string {
+	return inst.LocalName
+}
+
+// SetName sets the name of the instruction.
+func (inst *InstCatchPad) SetName(name string) {
+	inst.LocalName = name
+}
+
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstCatchPad) Def() string {
+	// 'catchpad' 'within' Scope=LocalIdent '[' Args=(ExceptionArg separator
+	// ',')* ']' Metadata=(',' MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "catchpad within %s [", inst.Scope.Ident())
+	for i, arg := range inst.Args {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(arg.String())
+	}
+	buf.WriteString("]")
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
+}
+
+// ~~~ [ cleanuppad ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstCleanupPad is an LLVM IR cleanuppad instruction.
+type InstCleanupPad struct {
+	// Name of local variable associated with the result.
+	LocalName string
+	// Exception scope.
+	Scope ExceptionScope // TODO: rename to Parent? rename to From?
+	// Exception arguments.
+	//
+	// Arg has one of the following underlying types:
+	//    value.Value
+	//    TODO: add metadata value?
+	Args []value.Value
+
+	// extra.
+
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
+}
+
+// NewCleanupPad returns a new cleanuppad instruction based on the given
+// exception scope and exception arguments.
+func NewCleanupPad(scope ExceptionScope, args ...value.Value) *InstCleanupPad {
+	return &InstCleanupPad{Scope: scope, Args: args}
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstCleanupPad) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
+}
+
+// Type returns the type of the instruction.
+func (inst *InstCleanupPad) Type() types.Type {
+	return types.Token
+}
+
+// Ident returns the identifier associated with the instruction.
+func (inst *InstCleanupPad) Ident() string {
+	return enc.Local(inst.LocalName)
+}
+
+// Name returns the name of the instruction.
+func (inst *InstCleanupPad) Name() string {
+	return inst.LocalName
+}
+
+// SetName sets the name of the instruction.
+func (inst *InstCleanupPad) SetName(name string) {
+	inst.LocalName = name
+}
+
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstCleanupPad) Def() string {
+	// 'cleanuppad' 'within' Scope=ExceptionScope '[' Args=(ExceptionArg
+	// separator ',')* ']' Metadata=(',' MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "cleanuppad within %s [", inst.Scope.Ident())
+	for i, arg := range inst.Args {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(arg.String())
+	}
+	buf.WriteString("]")
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
+}

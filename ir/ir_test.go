@@ -1,144 +1,214 @@
-package ir_test
+package ir
 
 import (
-	"github.com/llir/llvm/ir"
+	"strings"
+	"testing"
+
 	"github.com/llir/llvm/ir/constant"
 	"github.com/llir/llvm/ir/metadata"
+	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
 )
 
-// Validate that the relevant types satisfy the constant.Constant interface.
+func TestModuleString(t *testing.T) {
+	golden := []struct {
+		in   *Module
+		want string
+	}{
+		// Empty module.
+		{
+			in:   &Module{},
+			want: "",
+		},
+		// Type definition.
+		{
+			in: &Module{
+				TypeDefs: []types.Type{&types.StructType{
+					Alias:  "foo",
+					Fields: []types.Type{types.I32},
+				}},
+			},
+			want: "%foo = type { i32 }",
+		},
+	}
+	for _, g := range golden {
+		got := strings.TrimSpace(g.in.String())
+		if g.want != got {
+			t.Errorf("module mismatch; expected `%v`, got `%v`", g.want, got)
+		}
+	}
+}
+
+// Assert that each constant implements the constant.Constant interface.
 var (
-	_ constant.Constant = &ir.Global{}
-	_ constant.Constant = &ir.Function{}
+	// Constants.
+	_ constant.Constant = (*Global)(nil)
+	_ constant.Constant = (*Function)(nil)
+	_ constant.Constant = (*Alias)(nil)
+	_ constant.Constant = (*IFunc)(nil)
 )
 
-// Validate that the relevant types satisfy the ir.Instruction interface.
+// Assert that each instruction implements the ir.Instruction interface.
 var (
-	// Binary instructions
-	_ ir.Instruction = &ir.InstAdd{}
-	_ ir.Instruction = &ir.InstFAdd{}
-	_ ir.Instruction = &ir.InstSub{}
-	_ ir.Instruction = &ir.InstFSub{}
-	_ ir.Instruction = &ir.InstMul{}
-	_ ir.Instruction = &ir.InstFMul{}
-	_ ir.Instruction = &ir.InstUDiv{}
-	_ ir.Instruction = &ir.InstSDiv{}
-	_ ir.Instruction = &ir.InstFDiv{}
-	_ ir.Instruction = &ir.InstURem{}
-	_ ir.Instruction = &ir.InstSRem{}
-	_ ir.Instruction = &ir.InstFRem{}
-	// Bitwise instructions
-	_ ir.Instruction = &ir.InstShl{}
-	_ ir.Instruction = &ir.InstLShr{}
-	_ ir.Instruction = &ir.InstAShr{}
-	_ ir.Instruction = &ir.InstAnd{}
-	_ ir.Instruction = &ir.InstOr{}
-	_ ir.Instruction = &ir.InstXor{}
-	// Vector instructions
-	_ ir.Instruction = &ir.InstExtractElement{}
-	_ ir.Instruction = &ir.InstInsertElement{}
-	_ ir.Instruction = &ir.InstShuffleVector{}
-	// Aggregate instructions
-	_ ir.Instruction = &ir.InstExtractValue{}
-	_ ir.Instruction = &ir.InstInsertValue{}
-	// Memory instructions
-	_ ir.Instruction = &ir.InstAlloca{}
-	_ ir.Instruction = &ir.InstLoad{}
-	_ ir.Instruction = &ir.InstStore{}
-	_ ir.Instruction = &ir.InstGetElementPtr{}
-	// Conversion instructions
-	_ ir.Instruction = &ir.InstTrunc{}
-	_ ir.Instruction = &ir.InstZExt{}
-	_ ir.Instruction = &ir.InstSExt{}
-	_ ir.Instruction = &ir.InstFPTrunc{}
-	_ ir.Instruction = &ir.InstFPExt{}
-	_ ir.Instruction = &ir.InstFPToUI{}
-	_ ir.Instruction = &ir.InstFPToSI{}
-	_ ir.Instruction = &ir.InstUIToFP{}
-	_ ir.Instruction = &ir.InstSIToFP{}
-	_ ir.Instruction = &ir.InstPtrToInt{}
-	_ ir.Instruction = &ir.InstIntToPtr{}
-	_ ir.Instruction = &ir.InstBitCast{}
-	_ ir.Instruction = &ir.InstAddrSpaceCast{}
-	// Other instructions
-	_ ir.Instruction = &ir.InstICmp{}
-	_ ir.Instruction = &ir.InstFCmp{}
-	_ ir.Instruction = &ir.InstPhi{}
-	_ ir.Instruction = &ir.InstSelect{}
-	_ ir.Instruction = &ir.InstCall{}
+	// Binary instructions.
+	_ Instruction = (*InstAdd)(nil)
+	_ Instruction = (*InstFAdd)(nil)
+	_ Instruction = (*InstSub)(nil)
+	_ Instruction = (*InstFSub)(nil)
+	_ Instruction = (*InstMul)(nil)
+	_ Instruction = (*InstFMul)(nil)
+	_ Instruction = (*InstUDiv)(nil)
+	_ Instruction = (*InstSDiv)(nil)
+	_ Instruction = (*InstFDiv)(nil)
+	_ Instruction = (*InstURem)(nil)
+	_ Instruction = (*InstSRem)(nil)
+	_ Instruction = (*InstFRem)(nil)
+	// Bitwise instructions.
+	_ Instruction = (*InstShl)(nil)
+	_ Instruction = (*InstLShr)(nil)
+	_ Instruction = (*InstAShr)(nil)
+	_ Instruction = (*InstAnd)(nil)
+	_ Instruction = (*InstOr)(nil)
+	_ Instruction = (*InstXor)(nil)
+	// Vector instructions.
+	_ Instruction = (*InstExtractElement)(nil)
+	_ Instruction = (*InstInsertElement)(nil)
+	_ Instruction = (*InstShuffleVector)(nil)
+	// Aggregate instructions.
+	_ Instruction = (*InstExtractValue)(nil)
+	_ Instruction = (*InstInsertValue)(nil)
+	// Memory instructions.
+	_ Instruction = (*InstAlloca)(nil)
+	_ Instruction = (*InstLoad)(nil)
+	_ Instruction = (*InstStore)(nil)
+	_ Instruction = (*InstFence)(nil)
+	_ Instruction = (*InstCmpXchg)(nil)
+	_ Instruction = (*InstAtomicRMW)(nil)
+	_ Instruction = (*InstGetElementPtr)(nil)
+	// Conversion instructions.
+	_ Instruction = (*InstTrunc)(nil)
+	_ Instruction = (*InstZExt)(nil)
+	_ Instruction = (*InstSExt)(nil)
+	_ Instruction = (*InstFPTrunc)(nil)
+	_ Instruction = (*InstFPExt)(nil)
+	_ Instruction = (*InstFPToUI)(nil)
+	_ Instruction = (*InstFPToSI)(nil)
+	_ Instruction = (*InstUIToFP)(nil)
+	_ Instruction = (*InstSIToFP)(nil)
+	_ Instruction = (*InstPtrToInt)(nil)
+	_ Instruction = (*InstIntToPtr)(nil)
+	_ Instruction = (*InstBitCast)(nil)
+	_ Instruction = (*InstAddrSpaceCast)(nil)
+	// Other instructions.
+	_ Instruction = (*InstICmp)(nil)
+	_ Instruction = (*InstFCmp)(nil)
+	_ Instruction = (*InstPhi)(nil)
+	_ Instruction = (*InstSelect)(nil)
+	_ Instruction = (*InstCall)(nil)
+	_ Instruction = (*InstVAArg)(nil)
+	_ Instruction = (*InstLandingPad)(nil)
+	_ Instruction = (*InstCatchPad)(nil)
+	_ Instruction = (*InstCleanupPad)(nil)
 )
 
-// Validate that the relevant types satisfy the ir.Terminator interface.
+// Assert that each terminator implements the ir.Terminator interface.
 var (
-	// Terminators
-	_ ir.Terminator = &ir.TermRet{}
-	_ ir.Terminator = &ir.TermBr{}
-	_ ir.Terminator = &ir.TermCondBr{}
-	_ ir.Terminator = &ir.TermSwitch{}
-	_ ir.Terminator = &ir.TermUnreachable{}
+	// Terminators.
+	_ Terminator = (*TermRet)(nil)
+	_ Terminator = (*TermBr)(nil)
+	_ Terminator = (*TermCondBr)(nil)
+	_ Terminator = (*TermSwitch)(nil)
+	_ Terminator = (*TermIndirectBr)(nil)
+	_ Terminator = (*TermInvoke)(nil)
+	_ Terminator = (*TermResume)(nil)
+	_ Terminator = (*TermCatchSwitch)(nil)
+	_ Terminator = (*TermCatchRet)(nil)
+	_ Terminator = (*TermCleanupRet)(nil)
+	_ Terminator = (*TermUnreachable)(nil)
 )
 
-// Validate that the relevant types satisfy the value.Named interface.
+// Assert that each value implements the value.Value interface.
 var (
-	_ value.Named = &ir.Global{}
-	_ value.Named = &ir.Function{}
-	_ value.Named = &ir.BasicBlock{}
-	// Binary instructions
-	_ value.Named = &ir.InstAdd{}
-	_ value.Named = &ir.InstFAdd{}
-	_ value.Named = &ir.InstSub{}
-	_ value.Named = &ir.InstFSub{}
-	_ value.Named = &ir.InstMul{}
-	_ value.Named = &ir.InstFMul{}
-	_ value.Named = &ir.InstUDiv{}
-	_ value.Named = &ir.InstSDiv{}
-	_ value.Named = &ir.InstFDiv{}
-	_ value.Named = &ir.InstURem{}
-	_ value.Named = &ir.InstSRem{}
-	_ value.Named = &ir.InstFRem{}
-	// Bitwise instructions
-	_ value.Named = &ir.InstShl{}
-	_ value.Named = &ir.InstLShr{}
-	_ value.Named = &ir.InstAShr{}
-	_ value.Named = &ir.InstAnd{}
-	_ value.Named = &ir.InstOr{}
-	_ value.Named = &ir.InstXor{}
-	// Vector instructions
-	_ value.Named = &ir.InstExtractElement{}
-	_ value.Named = &ir.InstInsertElement{}
-	_ value.Named = &ir.InstShuffleVector{}
-	// Aggregate instructions
-	_ value.Named = &ir.InstExtractValue{}
-	_ value.Named = &ir.InstInsertValue{}
-	// Memory instructions
-	_ value.Named = &ir.InstAlloca{}
-	_ value.Named = &ir.InstLoad{}
-	_ value.Named = &ir.InstGetElementPtr{}
-	// Conversion instructions
-	_ value.Named = &ir.InstTrunc{}
-	_ value.Named = &ir.InstZExt{}
-	_ value.Named = &ir.InstSExt{}
-	_ value.Named = &ir.InstFPTrunc{}
-	_ value.Named = &ir.InstFPExt{}
-	_ value.Named = &ir.InstFPToUI{}
-	_ value.Named = &ir.InstFPToSI{}
-	_ value.Named = &ir.InstUIToFP{}
-	_ value.Named = &ir.InstSIToFP{}
-	_ value.Named = &ir.InstPtrToInt{}
-	_ value.Named = &ir.InstIntToPtr{}
-	_ value.Named = &ir.InstBitCast{}
-	_ value.Named = &ir.InstAddrSpaceCast{}
-	// Other instructions
-	_ value.Named = &ir.InstICmp{}
-	_ value.Named = &ir.InstFCmp{}
-	_ value.Named = &ir.InstPhi{}
-	_ value.Named = &ir.InstSelect{}
-	_ value.Named = &ir.InstCall{}
+	// Constants.
+	// Checked in constant_test.go as ir.Constant embeds value.Value.
+	_ value.Value = constant.Constant(nil)
+	// Named values.
+	// Checked in value_test.go as value.Named embeds value.Value.
+	_ value.Value = value.Named(nil)
+	// Inline assembler expressions.
+	_ value.Value = (*InlineAsm)(nil)
+	// Metadata values.
+	_ value.Value = (*metadata.Value)(nil)
 )
 
-// Validate that the relevant types satisfy the ir.MetadataNode interface.
+// Assert that each named value implements the value.Named interface.
 var (
-	_ metadata.Node = &ir.Global{}
-	_ metadata.Node = &ir.Function{}
+	// Other values.
+	_ value.Named = (*Global)(nil)
+	_ value.Named = (*Function)(nil)
+	_ value.Named = (*Param)(nil)
+	_ value.Named = (*BasicBlock)(nil)
+
+	// Instructions.
+	// Binary instructions.
+	_ value.Named = (*InstAdd)(nil)
+	_ value.Named = (*InstFAdd)(nil)
+	_ value.Named = (*InstSub)(nil)
+	_ value.Named = (*InstFSub)(nil)
+	_ value.Named = (*InstMul)(nil)
+	_ value.Named = (*InstFMul)(nil)
+	_ value.Named = (*InstUDiv)(nil)
+	_ value.Named = (*InstSDiv)(nil)
+	_ value.Named = (*InstFDiv)(nil)
+	_ value.Named = (*InstURem)(nil)
+	_ value.Named = (*InstSRem)(nil)
+	_ value.Named = (*InstFRem)(nil)
+	// Bitwise instructions.
+	_ value.Named = (*InstShl)(nil)
+	_ value.Named = (*InstLShr)(nil)
+	_ value.Named = (*InstAShr)(nil)
+	_ value.Named = (*InstAnd)(nil)
+	_ value.Named = (*InstOr)(nil)
+	_ value.Named = (*InstXor)(nil)
+	// Vector instructions.
+	_ value.Named = (*InstExtractElement)(nil)
+	_ value.Named = (*InstInsertElement)(nil)
+	_ value.Named = (*InstShuffleVector)(nil)
+	// Aggregate instructions.
+	_ value.Named = (*InstExtractValue)(nil)
+	_ value.Named = (*InstInsertValue)(nil)
+	// Memory instructions.
+	_ value.Named = (*InstAlloca)(nil)
+	_ value.Named = (*InstLoad)(nil)
+	_ value.Named = (*InstCmpXchg)(nil)
+	_ value.Named = (*InstAtomicRMW)(nil)
+	_ value.Named = (*InstGetElementPtr)(nil)
+	// Conversion instructions.
+	_ value.Named = (*InstTrunc)(nil)
+	_ value.Named = (*InstZExt)(nil)
+	_ value.Named = (*InstSExt)(nil)
+	_ value.Named = (*InstFPTrunc)(nil)
+	_ value.Named = (*InstFPExt)(nil)
+	_ value.Named = (*InstFPToUI)(nil)
+	_ value.Named = (*InstFPToSI)(nil)
+	_ value.Named = (*InstUIToFP)(nil)
+	_ value.Named = (*InstSIToFP)(nil)
+	_ value.Named = (*InstPtrToInt)(nil)
+	_ value.Named = (*InstIntToPtr)(nil)
+	_ value.Named = (*InstBitCast)(nil)
+	_ value.Named = (*InstAddrSpaceCast)(nil)
+	// Other instructions.
+	_ value.Named = (*InstICmp)(nil)
+	_ value.Named = (*InstFCmp)(nil)
+	_ value.Named = (*InstPhi)(nil)
+	_ value.Named = (*InstSelect)(nil)
+	_ value.Named = (*InstCall)(nil)
+	_ value.Named = (*InstVAArg)(nil)
+	_ value.Named = (*InstLandingPad)(nil)
+	_ value.Named = (*InstCatchPad)(nil)
+	_ value.Named = (*InstCleanupPad)(nil)
+
+	// Terminators.
+	_ value.Named = (*TermInvoke)(nil)
+	_ value.Named = (*TermCatchSwitch)(nil) // token result used by catchpad
 )

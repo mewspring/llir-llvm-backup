@@ -1,206 +1,180 @@
-// === [ Aggregate instructions ] ==============================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#aggregate-operations
-
 package ir
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/internal/enc"
 	"github.com/llir/llvm/ir/metadata"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
-	"github.com/pkg/errors"
 )
 
-// --- [ extractvalue ] --------------------------------------------------------
+// --- [ Aggregate instructions ] ----------------------------------------------
 
-// InstExtractValue represents an extractvalue instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#extractvalue-instruction
+// ~~~ [ extractvalue ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// InstExtractValue is an LLVM IR extractvalue instruction.
 type InstExtractValue struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
-	// Type of the instruction.
-	Typ types.Type
-	// Vector.
-	X value.Value
-	// Indices.
+	// Name of local variable associated with the result.
+	LocalName string
+	// Aggregate value.
+	X value.Value // array or struct
+	// Element indices.
 	Indices []int64
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewExtractValue returns a new extractvalue instruction based on the given
-// vector and indices.
-func NewExtractValue(x value.Value, indices []int64) *InstExtractValue {
-	typ, err := aggregateElemType(x.Type(), indices)
-	if err != nil {
-		panic(err)
-	}
-	return &InstExtractValue{
-		Typ:      typ,
-		X:        x,
-		Indices:  indices,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+// aggregate value and indicies.
+func NewExtractValue(x value.Value, indices ...int64) *InstExtractValue {
+	inst := &InstExtractValue{X: x, Indices: indices}
+	// Compute type.
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstExtractValue) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstExtractValue) Type() types.Type {
+	// Cache type if not present.
+	if inst.Typ == nil {
+		inst.Typ = aggregateElemType(inst.X.Type(), inst.Indices)
+	}
 	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstExtractValue) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstExtractValue) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstExtractValue) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstExtractValue) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstExtractValue) String() string {
-	indices := &bytes.Buffer{}
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstExtractValue) Def() string {
+	// 'extractvalue' X=TypeValue Indices=(',' UintLit)+ Metadata=(','
+	// MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "extractvalue %s", inst.X)
 	for _, index := range inst.Indices {
-		fmt.Fprintf(indices, ", %d", index)
+		fmt.Fprintf(buf, ", %d", index)
 	}
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = extractvalue %s %s%s%s",
-		inst.Ident(),
-		inst.X.Type(),
-		inst.X.Ident(),
-		indices,
-		md)
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
 }
 
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstExtractValue) GetParent() *BasicBlock {
-	return inst.Parent
-}
+// ~~~ [ insertvalue ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstExtractValue) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
-}
-
-// --- [ insertvalue ] ---------------------------------------------------------
-
-// InstInsertValue represents an insertvalue instruction.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#insertvalue-instruction
+// InstInsertValue is an LLVM IR insertvalue instruction.
 type InstInsertValue struct {
-	// Parent basic block.
-	Parent *BasicBlock
-	// Name of the local variable associated with the instruction.
-	Name string
-	// Vector.
-	X value.Value
+	// Name of local variable associated with the result.
+	LocalName string
+	// Aggregate value.
+	X value.Value // array or struct
 	// Element to insert.
 	Elem value.Value
-	// Indices.
+	// Element indices.
 	Indices []int64
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// instruction.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Type of result produced by the instruction.
+	Typ types.Type
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
 // NewInsertValue returns a new insertvalue instruction based on the given
-// vector, element and indices.
-func NewInsertValue(x, elem value.Value, indices []int64) *InstInsertValue {
-	return &InstInsertValue{
-		X:        x,
-		Elem:     elem,
-		Indices:  indices,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+// aggregate value, element and indicies.
+func NewInsertValue(x, elem value.Value, indices ...int64) *InstInsertValue {
+	inst := &InstInsertValue{X: x, Elem: elem, Indices: indices}
+	// Compute type.
+	return inst
+}
+
+// String returns the LLVM syntax representation of the instruction as a
+// type-value pair.
+func (inst *InstInsertValue) String() string {
+	return fmt.Sprintf("%s %s", inst.Type(), inst.Ident())
 }
 
 // Type returns the type of the instruction.
 func (inst *InstInsertValue) Type() types.Type {
-	return inst.X.Type()
+	// Cache type if not present.
+	if inst.Typ == nil {
+		inst.Typ = inst.X.Type()
+	}
+	return inst.Typ
 }
 
 // Ident returns the identifier associated with the instruction.
 func (inst *InstInsertValue) Ident() string {
-	return enc.Local(inst.Name)
+	return enc.Local(inst.LocalName)
 }
 
-// GetName returns the name of the local variable associated with the
-// instruction.
-func (inst *InstInsertValue) GetName() string {
-	return inst.Name
+// Name returns the name of the instruction.
+func (inst *InstInsertValue) Name() string {
+	return inst.LocalName
 }
 
-// SetName sets the name of the local variable associated with the instruction.
+// SetName sets the name of the instruction.
 func (inst *InstInsertValue) SetName(name string) {
-	inst.Name = name
+	inst.LocalName = name
 }
 
-// String returns the LLVM syntax representation of the instruction.
-func (inst *InstInsertValue) String() string {
-	indices := &bytes.Buffer{}
+// Def returns the LLVM syntax representation of the instruction.
+func (inst *InstInsertValue) Def() string {
+	// 'insertvalue' X=TypeValue ',' Elem=TypeValue Indices=(',' UintLit)+
+	// Metadata=(',' MetadataAttachment)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", inst.Ident())
+	fmt.Fprintf(buf, "insertvalue %s, %s", inst.X, inst.Elem)
 	for _, index := range inst.Indices {
-		fmt.Fprintf(indices, ", %d", index)
+		fmt.Fprintf(buf, ", %d", index)
 	}
-	md := metadataString(inst.Metadata, ",")
-	return fmt.Sprintf("%s = insertvalue %s %s, %s %s%s%s",
-		inst.Ident(),
-		inst.X.Type(),
-		inst.X.Ident(),
-		inst.Elem.Type(),
-		inst.Elem.Ident(),
-		indices,
-		md)
-}
-
-// GetParent returns the parent basic block of the instruction.
-func (inst *InstInsertValue) GetParent() *BasicBlock {
-	return inst.Parent
-}
-
-// SetParent sets the parent basic block of the instruction.
-func (inst *InstInsertValue) SetParent(parent *BasicBlock) {
-	inst.Parent = parent
+	for _, md := range inst.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	return buf.String()
 }
 
 // ### [ Helper functions ] ####################################################
 
-// aggregateElemType returns the element type of the given aggregate type, based
-// on the specified indices.
-func aggregateElemType(t types.Type, indices []int64) (types.Type, error) {
+// aggregateElemType returns the element type at the position in the aggregate
+// type specified by the given indices.
+func aggregateElemType(t types.Type, indices []int64) types.Type {
+	// Base case.
 	if len(indices) == 0 {
-		return t, nil
+		return t
 	}
-	index := indices[0]
 	switch t := t.(type) {
 	case *types.ArrayType:
-		if index >= t.Len {
-			return nil, errors.Errorf("invalid index (%d); exceeds array length (%d)", index, t.Len)
-		}
-		return aggregateElemType(t.Elem, indices[1:])
+		return aggregateElemType(t.ElemType, indices[1:])
 	case *types.StructType:
-		if index >= int64(len(t.Fields)) {
-			return nil, errors.Errorf("invalid index (%d); exceeds struct field count (%d)", index, len(t.Fields))
-		}
-		return aggregateElemType(t.Fields[index], indices[1:])
+		return aggregateElemType(t.Fields[indices[0]], indices[1:])
 	default:
-		return nil, errors.Errorf("invalid aggregate value type; expected *types.ArrayType or *types.StructType, got %T", t)
+		panic(fmt.Errorf("support for aggregate type %T not yet implemented", t))
 	}
 }

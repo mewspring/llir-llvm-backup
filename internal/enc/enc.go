@@ -1,3 +1,4 @@
+// Package enc implements encoding of identifiers for LLVM IR assembly.
 package enc
 
 import (
@@ -9,7 +10,7 @@ import (
 //
 // Examples:
 //    "foo" -> "@foo"
-//    "a b" -> `@"a\20b"`
+//    "a b" -> `@"a b"`
 //    "世" -> `@"\E4\B8\96"`
 //
 // References:
@@ -22,13 +23,51 @@ func Global(name string) string {
 //
 // Examples:
 //    "foo" -> "%foo"
-//    "a b" -> `%"a\20b"`
+//    "a b" -> `%"a b"`
 //    "世" -> `%"\E4\B8\96"`
 //
 // References:
 //    http://www.llvm.org/docs/LangRef.html#identifiers
 func Local(name string) string {
 	return "%" + EscapeIdent(name)
+}
+
+// Label encodes a label name to its LLVM IR assembly representation.
+//
+// Examples:
+//    "foo" -> "foo:"
+//    "a b" -> `"a b":`
+//    "世" -> `"\E4\B8\96":`
+//
+// References:
+//    http://www.llvm.org/docs/LangRef.html#identifiers
+func Label(name string) string {
+	return EscapeIdent(name) + ":"
+}
+
+// AttrGroupID encodes a attribute group ID to its LLVM IR assembly
+// representation.
+//
+// Examples:
+//    "42" -> "#42"
+//
+// References:
+//    http://www.llvm.org/docs/LangRef.html#identifiers
+func AttrGroupID(id string) string {
+	return "#" + id
+}
+
+// Comdat encodes a comdat name to its LLVM IR assembly representation.
+//
+// Examples:
+//    "foo" -> $%foo"
+//    "a b" -> `$"a b"`
+//    "世" -> `$"\E4\B8\96"`
+//
+// References:
+//    http://www.llvm.org/docs/LangRef.html#identifiers
+func Comdat(name string) string {
+	return "$" + EscapeIdent(name)
 }
 
 // Metadata encodes a metadata name to its LLVM IR assembly representation.
@@ -42,10 +81,9 @@ func Local(name string) string {
 //    http://www.llvm.org/docs/LangRef.html#identifiers
 func Metadata(name string) string {
 	valid := func(b byte) bool {
-		const metadataChar = tail + `\`
-		return strings.IndexByte(metadataChar, b) != -1
+		return strings.IndexByte(tail, b) != -1
 	}
-	return "!" + Escape(name, valid)
+	return "!" + string(Escape([]byte(name), valid))
 }
 
 const (
@@ -64,32 +102,46 @@ const (
 	// identifier (i.e. all characters in the identifier except the first). All
 	// characters of a label may be from the tail set, even the first character.
 	tail = head + decimal
+	// quotedIdent is the set of valid characters in quoted identifiers, which
+	// excludes ASCII control characters, double quote, backslash and extended
+	// ASCII characters.
+	quotedIdent = " !#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[]^_`abcdefghijklmnopqrstuvwxyz{|}~"
 )
 
 // EscapeIdent replaces any characters which are not valid in identifiers with
 // corresponding hexadecimal escape sequence (\XX).
 func EscapeIdent(s string) string {
-	// Check if a replacement is required.
+	replace := false
 	extra := 0
 	for i := 0; i < len(s); i++ {
 		if strings.IndexByte(tail, s[i]) == -1 {
-			// Two extra bytes are required for each invalid byte; e.g.
-			//    "#" -> `\23`
+			// Check if a replacement is required.
+			//
+			// Note, there are characters which are not valid in an identifier
+			// (e.g. '#') but are valid in a quoted identifier, and therefore
+			// require a replacement (i.e. quoted identifier), but no extra
+			// characters for the escape sequence.
+			replace = true
+		}
+		if strings.IndexByte(quotedIdent, s[i]) == -1 {
+			// Two extra bytes are required for each byte not valid in a quoted
+			// identifier; e.g.
+			//
+			//    "\t" -> `\09`
 			//    "世" -> `\E4\B8\96`
 			extra += 2
 		}
 	}
-	if extra == 0 {
+	if !replace {
 		return s
 	}
-
 	// Replace invalid characters.
 	const hextable = "0123456789ABCDEF"
 	buf := make([]byte, len(s)+extra)
 	j := 0
 	for i := 0; i < len(s); i++ {
 		b := s[i]
-		if strings.IndexByte(tail, b) != -1 {
+		if strings.IndexByte(quotedIdent, b) != -1 {
 			buf[j] = b
 			j++
 			continue
@@ -103,78 +155,55 @@ func EscapeIdent(s string) string {
 	return `"` + string(buf) + `"`
 }
 
-// EscapeString replaces any characters categorized as invalid in string
+// EscapeString replaces any characters in s categorized as invalid in string
 // literals with corresponding hexadecimal escape sequence (\XX).
-func EscapeString(s string) string {
+func EscapeString(s []byte) string {
 	valid := func(b byte) bool {
 		return ' ' <= b && b <= '~' && b != '"' && b != '\\'
 	}
-	return Escape(s, valid)
+	return string(Escape(s, valid))
 }
 
-// Escape replaces any characters categorized as invalid by the valid function
-// with corresponding hexadecimal escape sequence (\XX).
-func Escape(s string, valid func(b byte) bool) string {
+// Escape replaces any characters in s categorized as invalid by the valid
+// function with corresponding hexadecimal escape sequence (\XX).
+func Escape(s []byte, valid func(b byte) bool) string {
 	// Check if a replacement is required.
 	extra := 0
 	for i := 0; i < len(s); i++ {
-		b := s[i]
-		switch {
-		case !valid(b):
+		if !valid(s[i]) { // TODO: Check if there is a strings.IndexFunc.
 			// Two extra bytes are required for each invalid byte; e.g.
 			//    "#" -> `\23`
 			//    "世" -> `\E4\B8\96`
 			extra += 2
-		default:
-			// no extra bytes required.
 		}
 	}
 	if extra == 0 {
-		return s
+		return string(s)
 	}
-
 	// Replace invalid characters.
 	const hextable = "0123456789ABCDEF"
 	buf := make([]byte, len(s)+extra)
 	j := 0
 	for i := 0; i < len(s); i++ {
 		b := s[i]
-		switch {
-		case !valid(b):
-			buf[j] = '\\'
-			buf[j+1] = hextable[b>>4]
-			buf[j+2] = hextable[b&0x0F]
-			j += 3
-		default:
+		if valid(b) {
 			buf[j] = b
 			j++
+			continue
 		}
+		buf[j] = '\\'
+		buf[j+1] = hextable[b>>4]
+		buf[j+2] = hextable[b&0x0F]
+		j += 3
 	}
 	return string(buf)
 }
 
-// Unquote interprets s as a double-quoted string literal, returning the string
-// value that s quotes.
-func Unquote(s string) string {
-	if len(s) < 2 {
-		panic(fmt.Errorf("invalid length of quoted string; expected >= 2, got %d", len(s)))
-	}
-	if !strings.HasPrefix(s, `"`) {
-		panic(fmt.Errorf("invalid quoted string `%s`; missing quote character prefix", s))
-	}
-	if !strings.HasSuffix(s, `"`) {
-		panic(fmt.Errorf("invalid quoted string `%s`; missing quote character suffix", s))
-	}
-	// Skip double-quotes.
-	s = s[1 : len(s)-1]
-	return Unescape(s)
-}
-
 // Unescape replaces hexadecimal escape sequences (\xx) in s with their
 // corresponding characters.
-func Unescape(s string) string {
+func Unescape(s string) []byte {
 	if !strings.ContainsRune(s, '\\') {
-		return s
+		return []byte(s)
 	}
 	j := 0
 	buf := []byte(s)
@@ -200,7 +229,29 @@ func Unescape(s string) string {
 		}
 		j++
 	}
-	return string(buf[:j])
+	return buf[:j]
+}
+
+// Quote returns s as a double-quoted string literal.
+func Quote(s []byte) string {
+	return `"` + string(EscapeString(s)) + `"`
+}
+
+// Unquote interprets s as a double-quoted string literal, returning the string
+// value that s quotes.
+func Unquote(s string) []byte {
+	if len(s) < 2 {
+		panic(fmt.Errorf("invalid length of quoted string; expected >= 2, got %d", len(s)))
+	}
+	if !strings.HasPrefix(s, `"`) {
+		panic(fmt.Errorf("invalid quoted string `%s`; missing quote character prefix", s))
+	}
+	if !strings.HasSuffix(s, `"`) {
+		panic(fmt.Errorf("invalid quoted string `%s`; missing quote character suffix", s))
+	}
+	// Skip double-quotes.
+	s = s[1 : len(s)-1]
+	return Unescape(s)
 }
 
 // unhex returns the numeric value represented by the hexadecimal digit b. It

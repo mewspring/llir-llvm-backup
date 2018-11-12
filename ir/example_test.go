@@ -26,9 +26,9 @@ func Example() {
 
 	// Create convenience types and constants.
 	i32 := types.I32
-	zero := constant.NewInt(0, i32)
-	a := constant.NewInt(0x15A4E35, i32) // multiplier of the PRNG.
-	c := constant.NewInt(1, i32)         // increment of the PRNG.
+	zero := constant.NewInt(i32, 0)
+	a := constant.NewInt(i32, 0x15A4E35) // multiplier of the PRNG.
+	c := constant.NewInt(i32, 1)         // increment of the PRNG.
 
 	// Create a new LLVM IR module.
 	m := ir.NewModule()
@@ -69,7 +69,6 @@ func Example() {
 	// declare i32 @abs(i32 %x)
 	//
 	// define i32 @rand() {
-	// ; <label>:0
 	// 	%1 = load i32, i32* @seed
 	// 	%2 = mul i32 %1, 22695477
 	// 	%3 = add i32 %2, 1

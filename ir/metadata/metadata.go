@@ -1,148 +1,192 @@
-// === [ Metadata ] ============================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#metadata
-
 // Package metadata provides access to LLVM IR metadata.
 package metadata
 
 import (
-	"bytes"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/llir/llvm/internal/enc"
 	"github.com/llir/llvm/ir/types"
-	"github.com/llir/llvm/ir/value"
 )
 
-// A Node represents an LLVM IR metadata node.
-//
-// Node may have one of the following underlying types.
-//
-//    *metadata.Metadata   (https://godoc.org/github.com/llir/llvm/ir/metadata#Metadata)
-//    *metadata.String     (https://godoc.org/github.com/llir/llvm/ir/metadata#String)
-//    *metadata.Value      (https://godoc.org/github.com/llir/llvm/ir/metadata#Value)
-//    constant.Constant    (https://godoc.org/github.com/llir/llvm/ir/constant#Constant)
-type Node interface {
-	value.Value
-	// MetadataNode ensures that only metadata nodes can be assigned to the
-	// metadata.Node interface.
-	MetadataNode()
+// Convenience literals.
+var (
+	// Null metadata literal.
+	Null = &NullLit{}
+)
+
+// ~~~ [ Named Metadata Definition ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// NamedMetadataDef is a named metadata definition.
+type NamedMetadataDef struct {
+	// Metadata definition name (without '!' prefix).
+	Name string
+	// Metadata definition nodes.
+	Nodes []MetadataNode
 }
 
-// --- [ metadata ] ------------------------------------------------------------
-
-// Metadata represents a set of LLVM IR metadata nodes.
-//
-// Metadata may be referenced from instructions (e.g. call), and are thus
-// considered LLVM IR values of metadata type.
-type Metadata struct {
-	// Metadata ID; or empty if metadata literal.
-	ID string
-	// Metadata nodes.
-	Nodes []Node
+// String returns the string representation of the named metadata definition.
+func (md *NamedMetadataDef) String() string {
+	return enc.Metadata(md.Name)
 }
 
-// Type returns the type of the metadata.
-func (md *Metadata) Type() types.Type {
-	return types.Metadata
-}
-
-// Ident returns the identifier associated with the metadata.
-func (md *Metadata) Ident() string {
-	if len(md.ID) > 0 {
-		return enc.Metadata(md.ID)
-	}
-	return md.Def()
-}
-
-// Def returns the LLVM syntax representation of the definition of the metadata.
-func (md *Metadata) Def() string {
-	buf := &bytes.Buffer{}
-	buf.WriteString("!{")
+// Def returns the LLVM syntax representation of the named metadata definition.
+func (md *NamedMetadataDef) Def() string {
+	// Name=MetadataName '=' '!' '{' MDNodes=(MetadataNode separator ',')* '}'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = !{", enc.Metadata(md.Name))
 	for i, node := range md.Nodes {
 		if i != 0 {
 			buf.WriteString(", ")
 		}
-		if !types.Equal(node.Type(), types.Metadata) {
-			fmt.Fprintf(buf, "%s ", node.Type())
-		}
-		buf.WriteString(node.Ident())
+		buf.WriteString(node.String())
 	}
 	buf.WriteString("}")
 	return buf.String()
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// metadata.Node interface.
-func (*Metadata) MetadataNode() {}
+// ~~~ [ Metadata Definition ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// --- [ metadata string ] -----------------------------------------------------
+// MetadataDef is a metadata definition.
+type MetadataDef struct {
+	// Metadata definition ID (without '!' prefix).
+	ID string
+	// Metadata definition node.
+	Node MDNode // MDTuple or SpecializedMDNode
 
-// A String represents an LLVM IR metadata string.
-type String struct {
-	// String value.
-	Val string
+	// extra.
+
+	// (optional) Distinct.
+	Distinct bool
 }
 
-// Ident returns the identifier associated with the metadata.
-func (md *String) Ident() string {
-	return fmt.Sprintf(`!"%s"`, enc.EscapeString(md.Val))
+// String returns the string representation of the metadata definition.
+func (md *MetadataDef) String() string {
+	return enc.Metadata(md.ID)
 }
 
-// Type returns the type of the metadata.
-func (md *String) Type() types.Type {
-	return types.Metadata
+// Def returns the LLVM syntax representation of the metadata definition.
+func (md *MetadataDef) Def() string {
+	// ID=MetadataID '=' Distinctopt MDNode=MDTuple
+	//
+	// ID=MetadataID '=' Distinctopt MDNode=SpecializedMDNode
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s = ", enc.Metadata(md.ID))
+	if md.Distinct {
+		buf.WriteString("distinct ")
+	}
+	buf.WriteString(md.Node.String())
+	return buf.String()
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// metadata.Node interface.
-func (*String) MetadataNode() {}
+// === [ Metadata Nodes and Metadata Strings ] =================================
 
-// --- [ metadata value ] ------------------------------------------------------
+// --- [ Metadata Tuple ] ------------------------------------------------------
 
-// A Value represents an LLVM IR metadata value.
+// MDTuple is a metadata node tuple.
+type MDTuple struct {
+	// Metadata tuple fields.
+	Fields []MDField
+}
+
+// String returns the string representation of the metadata node tuple.
+func (md *MDTuple) String() string {
+	// '!' MDFields
+	buf := &strings.Builder{}
+	buf.WriteString("!{")
+	for i, field := range md.Fields {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(field.String())
+	}
+	buf.WriteString("}")
+	return buf.String()
+}
+
+// --- [ Metadata Value ] ------------------------------------------------------
+
+// A Value is a metadata value.
 type Value struct {
-	// Value.
-	X value.Value
+	// Metadata value.
+	Value Metadata
 }
 
-// Ident returns the identifier associated with the metadata.
-func (md *Value) Ident() string {
-	return fmt.Sprintf("%s %s", md.X.Type(), md.X.Ident())
+// String returns the LLVM syntax representation of the metadata value as a
+// type-value pair.
+func (md *Value) String() string {
+	return fmt.Sprintf("%s %s", md.Type(), md.Ident())
 }
 
-// Type returns the type of the metadata.
+// Type returns the type of the metadata value.
 func (md *Value) Type() types.Type {
 	return types.Metadata
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// metadata.Node interface.
-func (*Value) MetadataNode() {}
-
-// --- [ named metadata ] ------------------------------------------------------
-
-// Named represents a named collection of metadata, which belongs to a
-// module.
-type Named struct {
-	// Metadata name.
-	Name string
-	// Associated metadata.
-	Metadata []*Metadata
+// Ident returns the identifier associated with the metadata value.
+func (md *Value) Ident() string {
+	return md.Value.String()
 }
 
-// Def returns the LLVM syntax representation of the definition of the named
-// metadata.
-func (md *Named) Def() string {
-	buf := &bytes.Buffer{}
-	buf.WriteString("!{")
-	for i, metadata := range md.Metadata {
-		if i != 0 {
-			buf.WriteString(", ")
-		}
-		buf.WriteString(metadata.Ident())
-	}
-	buf.WriteString("}")
-	return buf.String()
+// --- [ Metadata String ] -----------------------------------------------------
+
+// MDString is a metadata string.
+type MDString struct {
+	// Metadata string value.
+	Value string
+}
+
+// String returns the string representation of the metadata string.
+func (md *MDString) String() string {
+	// '!' Val=StringLit
+	return fmt.Sprintf("!%s", quote(md.Value))
+}
+
+// --- [ Metadata Attachment ] -------------------------------------------------
+
+// MetadataAttachment is a metadata attachment.
+type MetadataAttachment struct {
+	// Metadata attachment name (without '!' prefix); e.g. !dbg.
+	Name string
+	// Metadata attachment node.
+	Node MDNode
+}
+
+// String returns the string representation of the metadata attachment.
+func (m *MetadataAttachment) String() string {
+	// Name=MetadataName MDNode
+	return fmt.Sprintf("%s %s", enc.Metadata(m.Name), m.Node)
+}
+
+// --- [ Integer literals ] -----------------------------------------------------
+
+// IntLit is an integer literal.
+type IntLit int64
+
+// String returns the string representation of the integer literal.
+func (i IntLit) String() string {
+	return strconv.FormatInt(int64(i), 10)
+}
+
+// UintLit is an unsigned integer literal.
+type UintLit uint64
+
+// String returns the string representation of the unsigned integer literal.
+func (i UintLit) String() string {
+	return strconv.FormatUint(uint64(i), 10)
+}
+
+// IsDIExpressionField ensures that only DIExpression fields can be assigned to
+// the metadata.DIExpressionField interface.
+func (UintLit) IsDIExpressionField() {}
+
+// --- [ Null literal ] --------------------------------------------------------
+
+// NullLit is a metadata null literal.
+type NullLit struct{}
+
+// String returns the string representation of the metadata null literal.
+func (i *NullLit) String() string {
+	return "null"
 }

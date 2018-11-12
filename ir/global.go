@@ -1,125 +1,183 @@
-// === [ Global variables ] ====================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#global-variables
-
 package ir
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/internal/enc"
 	"github.com/llir/llvm/ir/constant"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/metadata"
 	"github.com/llir/llvm/ir/types"
 )
 
-// A Global represents an LLVM IR global variable definition or external global
-// variable declaration.
-//
-// Global variables always define a pointer to their "content" type because they
-// describe a region of memory, and all memory objects in LLVM are accessed
-// through pointers.
-//
-// Global variables may be referenced from instructions (e.g. load), and are
-// thus considered LLVM IR values of pointer type.
+// === [ Global variables ] ====================================================
+
+// Global is a global variable declaration or definition.
 type Global struct {
-	// Global variable name.
-	Name string
-	// Global variable type.
-	Typ *types.PointerType
+	// Global variable name (without '@' prefix).
+	GlobalName string
+	// Immutability of global variable (constant or global).
+	Immutable bool
 	// Content type.
-	Content types.Type
-	// Initial value; or nil if defined externally.
+	ContentType types.Type
+	// Initial value; or nil if declaration.
 	Init constant.Constant
-	// Immutability of the global variable.
-	IsConst bool
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// global.
-	Metadata map[string]*metadata.Metadata
+
+	// extra.
+
+	// Pointer type to global variable, including an optional address space. If
+	// Typ is nil, the first invocation of Type stores a pointer type with
+	// ContentType as element.
+	Typ *types.PointerType
+	// (optional) Linkage; zero value if not present.
+	Linkage enum.Linkage
+	// (optional) Preemption; zero value if not present.
+	Preemption enum.Preemption
+	// (optional) Visibility; zero value if not present.
+	Visibility enum.Visibility
+	// (optional) DLL storage class; zero value if not present.
+	DLLStorageClass enum.DLLStorageClass
+	// (optional) Thread local storage model; zero value if not present.
+	TLSModel enum.TLSModel
+	// (optional) Unnamed address; zero value if not present.
+	UnnamedAddr enum.UnnamedAddr
+	// (optional) Externally initialized; false if not present.
+	ExternallyInitialized bool
+	// (optional) Section name; empty if not present.
+	Section string
+	// (optional) Comdat; nil if not present.
+	Comdat *ComdatDef
+	// (optional) Alignment; zero if not present.
+	Align Align
+	// (optional) Function attributes.
+	FuncAttrs []FuncAttribute
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
 }
 
-// NewGlobalDecl returns a new external global variable declaration based on the
-// given global variable name and content type.
-func NewGlobalDecl(name string, content types.Type) *Global {
-	typ := types.NewPointer(content)
-	return &Global{
-		Name:     name,
-		Typ:      typ,
-		Content:  content,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+// NewGlobalDecl returns a new global variable declaration based on the given
+// global variable name and content type.
+func NewGlobalDecl(name string, contentType types.Type) *Global {
+	global := &Global{GlobalName: name, ContentType: contentType}
+	// Compute type.
+	global.Type()
+	return global
 }
 
 // NewGlobalDef returns a new global variable definition based on the given
 // global variable name and initial value.
 func NewGlobalDef(name string, init constant.Constant) *Global {
-	content := init.Type()
-	typ := types.NewPointer(content)
-	return &Global{
-		Name:     name,
-		Typ:      typ,
-		Content:  content,
-		Init:     init,
-		Metadata: make(map[string]*metadata.Metadata),
-	}
+	global := &Global{GlobalName: name, ContentType: init.Type(), Init: init}
+	// Compute type.
+	global.Type()
+	return global
+}
+
+// String returns the LLVM syntax representation of the global variable as a
+// type-value pair.
+func (g *Global) String() string {
+	return fmt.Sprintf("%s %s", g.Type(), g.Ident())
 }
 
 // Type returns the type of the global variable.
-func (global *Global) Type() types.Type {
-	return global.Typ
+func (g *Global) Type() types.Type {
+	// Cache type if not present.
+	if g.Typ == nil {
+		g.Typ = types.NewPointer(g.ContentType)
+	}
+	return g.Typ
 }
 
 // Ident returns the identifier associated with the global variable.
-func (global *Global) Ident() string {
-	return enc.Global(global.Name)
+func (g *Global) Ident() string {
+	return enc.Global(g.GlobalName)
 }
 
-// GetName returns the name of the global variable.
-func (global *Global) GetName() string {
-	return global.Name
+// Name returns the name of the global variable.
+func (g *Global) Name() string {
+	return g.GlobalName
 }
 
 // SetName sets the name of the global variable.
-func (global *Global) SetName(name string) {
-	global.Name = name
+func (g *Global) SetName(name string) {
+	g.GlobalName = name
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*Global) Immutable() {}
-
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// metadata.Node interface.
-func (*Global) MetadataNode() {}
-
-// String returns the LLVM syntax representation of the global variable.
-func (global *Global) String() string {
-	imm := "global"
-	if global.IsConst {
-		imm = "constant"
+// Def returns the LLVM syntax representation of the global variable definition
+// or declaration.
+func (g *Global) Def() string {
+	// Global declaration.
+	//
+	//    Name=GlobalIdent '=' ExternLinkage Preemptionopt Visibilityopt
+	//    DLLStorageClassopt ThreadLocalopt UnnamedAddropt AddrSpaceopt
+	//    ExternallyInitializedopt Immutable ContentType=Type (',' Section)? (','
+	//    Comdat)? (',' Alignment)? Metadata=(',' MetadataAttachment)+?
+	//    FuncAttrs=(',' FuncAttribute)+?
+	//
+	// Global definition.
+	//
+	//    Name=GlobalIdent '=' Linkageopt Preemptionopt Visibilityopt
+	//    DLLStorageClassopt ThreadLocalopt UnnamedAddropt AddrSpaceopt
+	//    ExternallyInitializedopt Immutable ContentType=Type Init=Constant (','
+	//    Section)? (',' Comdat)? (',' Alignment)? Metadata=(','
+	//    MetadataAttachment)+? FuncAttrs=(',' FuncAttribute)+?
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "%s =", g.Ident())
+	if g.Linkage != enum.LinkageNone {
+		fmt.Fprintf(buf, " %s", g.Linkage)
 	}
-	md := metadataString(global.Metadata, ",")
-	addrspace := &bytes.Buffer{}
-	if global.Typ.AddrSpace != 0 {
-		fmt.Fprintf(addrspace, " addrspace(%d)", global.Typ.AddrSpace)
+	if g.Preemption != enum.PreemptionNone {
+		fmt.Fprintf(buf, " %s", g.Preemption)
 	}
-	if global.Init != nil {
-		// Global variable definition.
-		return fmt.Sprintf("%s =%s %s %s %s%s",
-			global.Ident(),
-			addrspace,
-			imm,
-			global.Init.Type(),
-			global.Init.Ident(),
-			md)
+	if g.Visibility != enum.VisibilityNone {
+		fmt.Fprintf(buf, " %s", g.Visibility)
 	}
-	// External global variable declaration.
-	return fmt.Sprintf("%s = external%s %s %s%s",
-		global.Ident(),
-		addrspace,
-		imm,
-		global.Content,
-		md)
+	if g.DLLStorageClass != enum.DLLStorageClassNone {
+		fmt.Fprintf(buf, " %s", g.DLLStorageClass)
+	}
+	if g.TLSModel != enum.TLSModelNone {
+		fmt.Fprintf(buf, " %s", g.TLSModel)
+	}
+	if g.UnnamedAddr != enum.UnnamedAddrNone {
+		fmt.Fprintf(buf, " %s", g.UnnamedAddr)
+	}
+	if t, ok := g.Type().(*types.PointerType); ok {
+		if t.AddrSpace != 0 {
+			fmt.Fprintf(buf, " %s", t.AddrSpace)
+		}
+	}
+	if g.ExternallyInitialized {
+		buf.WriteString(" externallyinitialized")
+	}
+	if g.Immutable {
+		buf.WriteString(" constant")
+	} else {
+		buf.WriteString(" global")
+	}
+	fmt.Fprintf(buf, " %s", g.ContentType)
+	if g.Init != nil {
+		// Global definition.
+		fmt.Fprintf(buf, " %s", g.Init.Ident())
+	}
+	if g.Section != "" {
+		fmt.Fprintf(buf, ", section %s", quote(g.Section))
+	}
+	if g.Comdat != nil {
+		if g.Comdat.Name == g.GlobalName {
+			buf.WriteString(", comdat")
+		} else {
+			fmt.Fprintf(buf, ", %s", g.Comdat)
+		}
+	}
+	if g.Align != 0 {
+		fmt.Fprintf(buf, ", %s", g.Align)
+	}
+	for _, md := range g.Metadata {
+		fmt.Fprintf(buf, ", %s", md)
+	}
+	for _, attr := range g.FuncAttrs {
+		fmt.Fprintf(buf, " %s", attr)
+	}
+	return buf.String()
 }

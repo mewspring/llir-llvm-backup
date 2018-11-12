@@ -1,155 +1,146 @@
-// === [ Aggregate expressions ] ===============================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#aggregate-operations
-
 package constant
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/ir/types"
-	"github.com/pkg/errors"
 )
 
-// --- [ extractvalue ] --------------------------------------------------------
+// --- [ Aggregate expressions ] -----------------------------------------------
 
-// ExprExtractValue represents an extractvalue expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#extractvalue-instruction
+// ~~~ [ extractvalue ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// ExprExtractValue is an LLVM IR extractvalue expression.
 type ExprExtractValue struct {
-	// Type of the constant expression.
-	Typ types.Type
-	// Vector.
+	// Aggregate value.
 	X Constant
-	// Indices.
+	// Element indices.
 	Indices []int64
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type
 }
 
 // NewExtractValue returns a new extractvalue expression based on the given
-// vector and indices.
-func NewExtractValue(x Constant, indices []int64) *ExprExtractValue {
-	typ, err := aggregateElemType(x.Type(), indices)
-	if err != nil {
-		panic(err)
-	}
-	return &ExprExtractValue{
-		Typ:     typ,
-		X:       x,
-		Indices: indices,
-	}
+// aggregate value and indicies.
+func NewExtractValue(x Constant, indices ...int64) *ExprExtractValue {
+	e := &ExprExtractValue{X: x, Indices: indices}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprExtractValue) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
 }
 
 // Type returns the type of the constant expression.
-func (expr *ExprExtractValue) Type() types.Type {
-	return expr.Typ
+func (e *ExprExtractValue) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		e.Typ = aggregateElemType(e.X.Type(), e.Indices)
+	}
+	return e.Typ
 }
 
-// Ident returns the string representation of the constant expression.
-func (expr *ExprExtractValue) Ident() string {
-	buf := &bytes.Buffer{}
-	for _, index := range expr.Indices {
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprExtractValue) Ident() string {
+	// 'extractvalue' '(' X=TypeConst Indices=(',' UintLit)* ')'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "extractvalue (%s", e.X)
+	for _, index := range e.Indices {
 		fmt.Fprintf(buf, ", %d", index)
 	}
-	return fmt.Sprintf("extractvalue (%s %s%s)",
-		expr.X.Type(),
-		expr.X.Ident(),
-		buf)
+	buf.WriteString(")")
+	return buf.String()
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprExtractValue) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprExtractValue) Simplify() Constant {
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprExtractValue) Simplify() Constant {
 	panic("not yet implemented")
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprExtractValue) MetadataNode() {}
+// ~~~ [ insertvalue ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// --- [ insertvalue ] ---------------------------------------------------------
-
-// ExprInsertValue represents an insertvalue expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#insertvalue-instruction
+// ExprInsertValue is an LLVM IR insertvalue expression.
 type ExprInsertValue struct {
-	// Vector.
+	// Aggregate value.
 	X Constant
 	// Element to insert.
 	Elem Constant
-	// Indices.
+	// Element indices.
 	Indices []int64
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type
 }
 
 // NewInsertValue returns a new insertvalue expression based on the given
-// vector, element and indices.
-func NewInsertValue(x, elem Constant, indices []int64) *ExprInsertValue {
-	return &ExprInsertValue{
-		X:       x,
-		Elem:    elem,
-		Indices: indices,
-	}
+// aggregate value, element and indicies.
+func NewInsertValue(x, elem Constant, indices ...int64) *ExprInsertValue {
+	e := &ExprInsertValue{X: x, Elem: elem, Indices: indices}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprInsertValue) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
 }
 
 // Type returns the type of the constant expression.
-func (expr *ExprInsertValue) Type() types.Type {
-	return expr.X.Type()
+func (e *ExprInsertValue) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		e.Typ = e.X.Type()
+	}
+	return e.Typ
 }
 
-// Ident returns the string representation of the constant expression.
-func (expr *ExprInsertValue) Ident() string {
-	buf := &bytes.Buffer{}
-	for _, index := range expr.Indices {
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprInsertValue) Ident() string {
+	// 'insertvalue' '(' X=TypeConst ',' Elem=TypeConst Indices=(',' UintLit)*
+	// ')'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "insertvalue (%s, %s", e.X, e.Elem)
+	for _, index := range e.Indices {
 		fmt.Fprintf(buf, ", %d", index)
 	}
-	return fmt.Sprintf("insertvalue (%s %s, %s %s%s)",
-		expr.X.Type(),
-		expr.X.Ident(),
-		expr.Elem.Type(),
-		expr.Elem.Ident(),
-		buf)
+	buf.WriteString(")")
+	return buf.String()
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprInsertValue) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprInsertValue) Simplify() Constant {
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprInsertValue) Simplify() Constant {
 	panic("not yet implemented")
 }
 
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprInsertValue) MetadataNode() {}
-
 // ### [ Helper functions ] ####################################################
 
-// aggregateElemType returns the element type of the given aggregate type, based
-// on the specified indices.
-func aggregateElemType(t types.Type, indices []int64) (types.Type, error) {
+// aggregateElemType returns the element type at the position in the aggregate
+// type specified by the given indices.
+func aggregateElemType(t types.Type, indices []int64) types.Type {
+	// Base case.
 	if len(indices) == 0 {
-		return t, nil
+		return t
 	}
-	index := indices[0]
 	switch t := t.(type) {
 	case *types.ArrayType:
-		if index >= t.Len {
-			return nil, errors.Errorf("invalid index (%d); exceeds array length (%d)", index, t.Len)
-		}
-		return aggregateElemType(t.Elem, indices[1:])
+		return aggregateElemType(t.ElemType, indices[1:])
 	case *types.StructType:
-		if index >= int64(len(t.Fields)) {
-			return nil, errors.Errorf("invalid index (%d); exceeds struct field count (%d)", index, len(t.Fields))
-		}
-		return aggregateElemType(t.Fields[index], indices[1:])
+		return aggregateElemType(t.Fields[indices[0]], indices[1:])
 	default:
-		return nil, errors.Errorf("invalid aggregate value type; expected *types.ArrayType or *types.StructType, got %T", t)
+		panic(fmt.Errorf("support for aggregate type %T not yet implemented", t))
 	}
 }

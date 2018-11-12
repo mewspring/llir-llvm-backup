@@ -1,43 +1,117 @@
-// === [ Memory expressions ] ==================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#memory-access-and-addressing-operations
-
 package constant
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/ir/types"
 )
 
-// --- [ getelementptr ] -------------------------------------------------------
+// --- [ Memory expressions ] --------------------------------------------------
 
-// ExprGetElementPtr represents a getelementptr expression.
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#getelementptr-instruction
+// ~~~ [ getelementptr ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// ExprGetElementPtr is an LLVM IR getelementptr expression.
 type ExprGetElementPtr struct {
-	// Type of the constant expression.
-	Typ *types.PointerType
-	// Source address element type.
-	Elem types.Type
+	// Element type.
+	ElemType types.Type
 	// Source address.
 	Src Constant
-	// Element indices.
-	Indices []Constant
+	// Element indicies.
+	Indices []*Index
+
+	// extra.
+
+	// Type of result produced by the constant expression.
+	Typ types.Type // *types.PointerType or *types.VectorType
+	// (optional) The result is a poison value if the calculated pointer is not
+	// an in bounds address of the allocated source object.
+	InBounds bool
 }
 
 // NewGetElementPtr returns a new getelementptr expression based on the given
-// source address and element indices.
-func NewGetElementPtr(src Constant, indices ...Constant) *ExprGetElementPtr {
-	srcType, ok := src.Type().(*types.PointerType)
-	if !ok {
-		panic(fmt.Errorf("invalid source address type; expected *types.PointerType, got %T", src.Type()))
+// element type, source address and element indices.
+func NewGetElementPtr(elemType types.Type, src Constant, indices ...*Index) *ExprGetElementPtr {
+	e := &ExprGetElementPtr{ElemType: elemType, Src: src, Indices: indices}
+	// Compute type.
+	e.Type()
+	return e
+}
+
+// String returns the LLVM syntax representation of the constant expression as a
+// type-value pair.
+func (e *ExprGetElementPtr) String() string {
+	return fmt.Sprintf("%s %s", e.Type(), e.Ident())
+}
+
+// Type returns the type of the constant expression.
+func (e *ExprGetElementPtr) Type() types.Type {
+	// Cache type if not present.
+	if e.Typ == nil {
+		e.Typ = gepType(e.ElemType, e.Indices)
 	}
-	elem := srcType.Elem
-	e := elem
+	return e.Typ
+}
+
+// Ident returns the identifier associated with the constant expression.
+func (e *ExprGetElementPtr) Ident() string {
+	// 'getelementptr' InBoundsopt '(' ElemType=Type ',' Src=TypeConst
+	// Indices=(',' GEPIndex)* ')'
+	buf := &strings.Builder{}
+	buf.WriteString("getelementptr")
+	if e.InBounds {
+		buf.WriteString(" inbounds")
+	}
+	fmt.Fprintf(buf, " (%s, %s", e.ElemType, e.Src)
+	for _, index := range e.Indices {
+		fmt.Fprintf(buf, ", %s", index)
+	}
+	buf.WriteString(")")
+	return buf.String()
+}
+
+// Simplify returns an equivalent (and potentially simplified) constant to the
+// constant expression.
+func (e *ExprGetElementPtr) Simplify() Constant {
+	panic("not yet implemented")
+}
+
+// ___ [ gep indices ] _________________________________________________________
+
+// Index is an index of a getelementptr constant expression.
+type Index struct {
+	// Element index.
+	Index Constant
+
+	// extra.
+
+	// (optional) States that the element index is not out the bounds of the
+	// allocated object. If inrange is stated but the element index is out of
+	// bounds, the behaviour is undefined.
+	InRange bool
+}
+
+// NewIndex returns a new gep element index.
+func NewIndex(index Constant) *Index {
+	return &Index{Index: index}
+}
+
+// String returns a string representation of the getelementptr index.
+func (index *Index) String() string {
+	// OptInrange Type Constant
+	if index.InRange {
+		return fmt.Sprintf("inrange %s", index.Index)
+	}
+	return index.Index.String()
+}
+
+// ### [ Helper functions ] ####################################################
+
+// gepType returns the pointer type or vector of pointers type to the element at
+// the position in the type specified by the given indices, as calculated by the
+// getelementptr instruction.
+func gepType(elemType types.Type, indices []*Index) types.Type {
+	e := elemType
 	for i, index := range indices {
 		if i == 0 {
 			// Ignore checking the 0th index as it simply follows the pointer of
@@ -49,60 +123,31 @@ func NewGetElementPtr(src Constant, indices ...Constant) *ExprGetElementPtr {
 		switch t := e.(type) {
 		case *types.PointerType:
 			// ref: http://llvm.org/docs/GetElementPtr.html#what-is-dereferenced-by-gep
-			panic("unable to index into element of pointer type; for more information, see http://llvm.org/docs/GetElementPtr.html#what-is-dereferenced-by-gep")
+			panic(fmt.Errorf("unable to index into element of pointer type `%s`; for more information, see http://llvm.org/docs/GetElementPtr.html#what-is-dereferenced-by-gep", elemType))
 		case *types.VectorType:
-			e = t.Elem
+			e = t.ElemType
 		case *types.ArrayType:
-			e = t.Elem
+			e = t.ElemType
 		case *types.StructType:
-			idx, ok := index.(*Int)
+			idx, ok := index.Index.(*Int)
 			if !ok {
 				panic(fmt.Errorf("invalid index type for structure element; expected *constant.Int, got %T", index))
 			}
-			e = t.Fields[idx.Int64()]
+			e = t.Fields[idx.X.Int64()]
 		default:
 			panic(fmt.Errorf("support for indexing element type %T not yet implemented", e))
 		}
 	}
-	typ := types.NewPointer(e)
-	return &ExprGetElementPtr{
-		Typ:     typ,
-		Elem:    elem,
-		Src:     src,
-		Indices: indices,
+	// TODO: Validate how index vectors in gep are supposed to work.
+	//
+	// Example from dir.ll:
+	//    %113 = getelementptr inbounds %struct.fileinfo, %struct.fileinfo* %96, <2 x i64> %110, !dbg !4736
+	//    %116 = bitcast i8** %115 to <2 x %struct.fileinfo*>*, !dbg !4738
+	//    store <2 x %struct.fileinfo*> %113, <2 x %struct.fileinfo*>* %116, align 8, !dbg !4738, !tbaa !1793
+	if len(indices) > 0 {
+		if t, ok := indices[0].Index.Type().(*types.VectorType); ok {
+			return types.NewVector(t.Len, types.NewPointer(e))
+		}
 	}
+	return types.NewPointer(e)
 }
-
-// Type returns the type of the constant expression.
-func (expr *ExprGetElementPtr) Type() types.Type {
-	return expr.Typ
-}
-
-// Ident returns the string representation of the constant expression.
-func (expr *ExprGetElementPtr) Ident() string {
-	buf := &bytes.Buffer{}
-	fmt.Fprintf(buf, "getelementptr (%s, %s %s",
-		expr.Elem,
-		expr.Src.Type(),
-		expr.Src.Ident())
-	for _, index := range expr.Indices {
-		fmt.Fprintf(buf, ", %s %s",
-			index.Type(),
-			index.Ident())
-	}
-	buf.WriteString(")")
-	return buf.String()
-}
-
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*ExprGetElementPtr) Immutable() {}
-
-// Simplify returns a simplified version of the constant expression.
-func (expr *ExprGetElementPtr) Simplify() Constant {
-	panic("not yet implemented")
-}
-
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// ir.MetadataNode interface.
-func (*ExprGetElementPtr) MetadataNode() {}

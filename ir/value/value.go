@@ -1,36 +1,45 @@
 // Package value provides a definition of LLVM IR values.
 package value
 
-import "github.com/llir/llvm/ir/types"
+import (
+	"fmt"
 
-// A Value represents an LLVM IR value, which may be used as an operand of
-// instructions and terminators.
+	"github.com/llir/llvm/ir/types"
+)
+
+// Value is an LLVM IR value.
 //
-// Value may have one of the following underlying types.
+// A Value has one of the following underlying types.
 //
-//    constant.Constant   (https://godoc.org/github.com/llir/llvm/ir/constant#Constant)
-//    value.Named         (https://godoc.org/github.com/llir/llvm/ir/value#Named)
-//    *metadata.Value     (https://godoc.org/github.com/llir/llvm/ir/metadata#Value)
+//    ir.Constant   // https://godoc.org/github.com/llir/llvm/ir#Constant
+//    value.Named   // https://godoc.org/github.com/llir/llvm/ir/value#Named
+//    TODO: add literal metadata value?
 type Value interface {
+	// String returns the LLVM syntax representation of the value as a type-value
+	// pair.
+	fmt.Stringer
 	// Type returns the type of the value.
 	Type() types.Type
 	// Ident returns the identifier associated with the value.
 	Ident() string
 }
 
-// Named represents a named LLVM IR value.
+// Named is a named LLVM IR value.
 //
-// Named may have one of the following underlying types.
+// A Named value has one of the following underlying types.
 //
-//    *ir.Global       (https://godoc.org/github.com/llir/llvm/ir#Global)
-//    *ir.Function     (https://godoc.org/github.com/llir/llvm/ir#Function)
-//    *types.Param     (https://godoc.org/github.com/llir/llvm/ir/types#Param)
-//    *ir.BasicBlock   (https://godoc.org/github.com/llir/llvm/ir#BasicBlock)
-//    ir.Instruction   (https://godoc.org/github.com/llir/llvm/ir#Instruction)
+//    *ir.Global            // https://godoc.org/github.com/llir/llvm/ir#Global
+//    *ir.Function          // https://godoc.org/github.com/llir/llvm/ir#Function
+//    *ir.Param             // https://godoc.org/github.com/llir/llvm/ir#Param
+//    *ir.BasicBlock        // https://godoc.org/github.com/llir/llvm/ir#BasicBlock
+//    TODO: add named metadata value?
+//    ir.Instruction        // https://godoc.org/github.com/llir/llvm/ir#Instruction (except store and fence)
+//    *ir.TermInvoke        // https://godoc.org/github.com/llir/llvm/ir#TermInvoke
+//    *ir.TermCatchSwitch   // https://godoc.org/github.com/llir/llvm/ir#TermCatchSwitch (token result used by catchpad)
 type Named interface {
 	Value
-	// GetName returns the name of the value.
-	GetName() string
+	// Name returns the name of the value.
+	Name() string
 	// SetName sets the name of the value.
 	SetName(name string)
 }

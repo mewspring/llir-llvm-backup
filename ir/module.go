@@ -1,40 +1,54 @@
-//go:generate go run gen.go
-
-// === [ Modules ] =============================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#module-structure
-
 // Package ir declares the types used to represent LLVM IR modules.
 package ir
 
 import (
-	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/llir/llvm/internal/enc"
-	"github.com/llir/llvm/ir/constant"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/metadata"
 	"github.com/llir/llvm/ir/types"
+	"github.com/llir/llvm/ir/value"
 )
 
-// A Module represents an LLVM IR module, which consists of top-level type
-// definitions, global variables, functions, and metadata.
+// === [ Modules ] =============================================================
+
+// Module is an LLVM IR module.
 type Module struct {
-	// Data layout.
-	DataLayout string
-	// Target triple.
-	TargetTriple string
 	// Type definitions.
-	Types []types.Type
-	// Global variables of the module.
+	TypeDefs []types.Type
+	// Global variable declarations and definitions.
 	Globals []*Global
-	// Functions of the module.
+	// Function declarations and definitions.
 	Funcs []*Function
-	// Named metadata of the module.
-	NamedMetadata []*metadata.Named
-	// Metadata of the module.
-	Metadata []*metadata.Metadata
+
+	// extra.
+
+	// (optional) Source filename; or empty if not present.
+	SourceFilename string
+	// (optional) Data layout; or empty if not present.
+	DataLayout string
+	// (optional) Target triple; or empty if not present.
+	TargetTriple string
+	// (optional) Module-level inline assembly.
+	ModuleAsms []string
+	// (optional) Comdat definitions.
+	ComdatDefs []*ComdatDef
+	// (optional) Aliases.
+	Aliases []*Alias
+	// (optional) IFuncs.
+	IFuncs []*IFunc
+	// (optional) Attribute group definitions.
+	AttrGroupDefs []*AttrGroupDef
+	// (optional) Named metadata definitions.
+	NamedMetadataDefs []*metadata.NamedMetadataDef
+	// (optional) Metadata definitions.
+	MetadataDefs []*metadata.MetadataDef
+	// (optional) Use-list order directives.
+	UseListOrders []*UseListOrder
+	// (optional) Basic block specific use-list order directives.
+	UseListOrderBBs []*UseListOrderBB
 }
 
 // NewModule returns a new LLVM IR module.
@@ -42,85 +56,218 @@ func NewModule() *Module {
 	return &Module{}
 }
 
-// String returns the LLVM syntax representation of the module.
+// String returns the string representation of the module in LLVM IR assembly
+// syntax.
 func (m *Module) String() string {
-	buf := &bytes.Buffer{}
+	buf := &strings.Builder{}
+	// Source filename.
+	if len(m.SourceFilename) > 0 {
+		// 'source_filename' '=' Name=StringLit
+		fmt.Fprintf(buf, "source_filename = %s\n", quote(m.SourceFilename))
+	}
+	// Data layout.
 	if len(m.DataLayout) > 0 {
-		fmt.Fprintf(buf, "target datalayout = %q\n", m.DataLayout)
+		// 'target' 'datalayout' '=' DataLayout=StringLit
+		fmt.Fprintf(buf, "target datalayout = %s\n", quote(m.DataLayout))
 	}
+	// Target triple.
 	if len(m.TargetTriple) > 0 {
-		fmt.Fprintf(buf, "target triple = %q\n", m.TargetTriple)
+		// 'target' 'triple' '=' TargetTriple=StringLit
+		fmt.Fprintf(buf, "target triple = %s\n", quote(m.TargetTriple))
 	}
-	for _, typ := range m.Types {
-		if len(buf.Bytes()) > 0 {
+	// Module-level inline assembly.
+	for _, asm := range m.ModuleAsms {
+		// 'module' 'asm' Asm=StringLit
+		fmt.Fprintf(buf, "module asm %s\n", quote(asm))
+	}
+	// Type definitions.
+	if len(m.TypeDefs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, t := range m.TypeDefs {
+		// Alias=LocalIdent '=' 'type' Typ=OpaqueType
+		//
+		// Alias=LocalIdent '=' 'type' Typ=Type
+		fmt.Fprintf(buf, "%s = type %s\n", t, t.Def())
+	}
+	// Comdat definitions.
+	if len(m.ComdatDefs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for i, c := range m.ComdatDefs {
+		if i != 0 {
 			buf.WriteString("\n")
 		}
-		name := enc.Local(typ.GetName())
-		fmt.Fprintf(buf, "%s = type %s\n", name, typ.Def())
+		fmt.Fprintln(buf, c.Def())
 	}
-	for _, global := range m.Globals {
-		if len(buf.Bytes()) > 0 {
+	// Global declarations and definitions.
+	if len(m.Globals) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, g := range m.Globals {
+		fmt.Fprintln(buf, g.Def())
+	}
+	// Aliases.
+	if len(m.Aliases) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, alias := range m.Aliases {
+		fmt.Fprintln(buf, alias.Def())
+	}
+	// IFuncs.
+	if len(m.IFuncs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, ifunc := range m.IFuncs {
+		fmt.Fprintln(buf, ifunc.Def())
+	}
+	// Function declarations and definitions.
+	if len(m.Funcs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for i, f := range m.Funcs {
+		if i != 0 {
 			buf.WriteString("\n")
 		}
-		fmt.Fprintln(buf, global)
+		fmt.Fprintln(buf, f.Def())
 	}
-	for _, f := range m.Funcs {
-		if len(buf.Bytes()) > 0 {
-			buf.WriteString("\n")
-		}
-		fmt.Fprintln(buf, f)
+	// Attribute group definitions.
+	if len(m.AttrGroupDefs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
 	}
-	for _, md := range m.NamedMetadata {
-		if len(buf.Bytes()) > 0 {
-			buf.WriteString("\n")
-		}
-		name := enc.Metadata(md.Name)
-		fmt.Fprintf(buf, "%s = %s\n", name, md.Def())
+	for _, a := range m.AttrGroupDefs {
+		fmt.Fprintln(buf, a.Def())
 	}
-	for _, md := range m.Metadata {
-		if len(buf.Bytes()) > 0 {
-			buf.WriteString("\n")
-		}
-		id := enc.Metadata(md.ID)
-		fmt.Fprintf(buf, "%s = %s\n", id, md.Def())
+	// Named metadata definitions.
+	if len(m.NamedMetadataDefs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, md := range m.NamedMetadataDefs {
+		fmt.Fprintln(buf, md.Def())
+	}
+	// Metadata definitions.
+	if len(m.MetadataDefs) > 0 && buf.Len() > 0 {
+		buf.WriteString("\n")
+	}
+	for _, md := range m.MetadataDefs {
+		fmt.Fprintln(buf, md.Def())
+	}
+	// Use-list orders.
+	for _, u := range m.UseListOrders {
+		fmt.Fprintln(buf, u.Def())
+	}
+	// Basic block specific use-list orders.
+	for _, u := range m.UseListOrderBBs {
+		fmt.Fprintln(buf, u.Def())
 	}
 	return buf.String()
 }
 
-// AppendFunction appends the given function to the module.
-func (m *Module) AppendFunction(f *Function) {
-	f.Parent = m
-	m.Funcs = append(m.Funcs, f)
+// ~~~ [ Comdat Definition ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// ComdatDef is a comdat definition top-level entity.
+type ComdatDef struct {
+	// Comdat name (without '$' prefix).
+	Name string
+	// Comdat kind.
+	Kind enum.SelectionKind
 }
 
-// NewType appends a new type definition to the module based on the given type
-// name and underlying type definition.
-func (m *Module) NewType(name string, typ types.Type) types.Type {
-	typ.SetName(name)
-	m.Types = append(m.Types, typ)
-	return typ
+// String returns the string representation of the Comdat definition.
+func (c *ComdatDef) String() string {
+	return fmt.Sprintf("comdat(%s)", enc.Comdat(c.Name))
 }
 
-// NewGlobalDecl appends a new external global variable declaration to the
-// module based on the given global variable name and content type.
-func (m *Module) NewGlobalDecl(name string, content types.Type) *Global {
-	global := NewGlobalDecl(name, content)
-	m.Globals = append(m.Globals, global)
-	return global
+// Def returns the LLVM syntax representation of the Comdat definition.
+func (c *ComdatDef) Def() string {
+	// Name=ComdatName '=' 'comdat' Kind=SelectionKind
+	return fmt.Sprintf("%s = comdat %s", enc.Comdat(c.Name), c.Kind)
 }
 
-// NewGlobalDef appends a new global variable definition to the module based on
-// the given global variable name and initial value.
-func (m *Module) NewGlobalDef(name string, init constant.Constant) *Global {
-	global := NewGlobalDef(name, init)
-	m.Globals = append(m.Globals, global)
-	return global
+// ~~~ [ Attribute Group Definition ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// AttrGroupDef is an attribute group definition.
+type AttrGroupDef struct {
+	// Attribute group ID (without '#' prefix).
+	ID string
+	// Function attributes.
+	FuncAttrs []FuncAttribute
 }
 
-// NewFunction appends a new function to the module based on the given function
-// name, return type and parameters.
-func (m *Module) NewFunction(name string, ret types.Type, params ...*types.Param) *Function {
-	f := NewFunction(name, ret, params...)
-	m.AppendFunction(f)
-	return f
+// String returns the string representation of the attribute group definition.
+func (a *AttrGroupDef) String() string {
+	return enc.AttrGroupID(a.ID)
+}
+
+// Def returns the LLVM syntax representation of the attribute group definition.
+func (a *AttrGroupDef) Def() string {
+	// 'attributes' ID=AttrGroupID '=' '{' Attrs=FuncAttribute* '}'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "attributes %s = { ", enc.AttrGroupID(a.ID))
+	for i, attr := range a.FuncAttrs {
+		if i != 0 {
+			buf.WriteString(" ")
+		}
+		// Note, alignment is printed as `align = 8` in attribute groups.
+		if attr, ok := attr.(Align); ok {
+			fmt.Fprintf(buf, "align = %d", int64(attr))
+			continue
+		}
+		buf.WriteString(attr.String())
+	}
+	buf.WriteString(" }")
+	return buf.String()
+}
+
+// ~~~ [ Use-list Order Directives ] ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+// UseListOrder is a use-list order directive.
+type UseListOrder struct {
+	// Value.
+	Value value.Value
+	// Use-list order.
+	Indices []int64
+}
+
+// Def returns the LLVM syntax representation of the use-list order directive
+// definition.
+func (u *UseListOrder) Def() string {
+	//  'uselistorder' TypeValue ',' '{' Indices=(UintLit separator ',')+ '}'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "uselistorder %s, {", u.Value)
+	for i, index := range u.Indices {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		fmt.Fprintf(buf, "%d", index)
+	}
+	buf.WriteString("}")
+	return buf.String()
+}
+
+// UseListOrderBB is a basic block specific use-list order directive.
+type UseListOrderBB struct {
+	// Function.
+	Func *Function
+	// Basic block.
+	Block *BasicBlock
+	// Use-list order.
+	Indices []int64
+}
+
+// Def returns the LLVM syntax representation of the basic block specific use-
+// list order directive definition.
+func (u *UseListOrderBB) Def() string {
+	//  'uselistorder_bb' Func=GlobalIdent ',' Block=LocalIdent ',' '{'
+	//  Indices=(UintLit separator ',')+ '}'
+	buf := &strings.Builder{}
+	fmt.Fprintf(buf, "uselistorder_bb %s, %s, {", u.Func.Ident(), u.Block.Ident())
+	for i, index := range u.Indices {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		fmt.Fprintf(buf, "%d", index)
+	}
+	buf.WriteString("}")
+	return buf.String()
 }

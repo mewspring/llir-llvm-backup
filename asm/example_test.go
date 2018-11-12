@@ -18,171 +18,210 @@ func Example() {
 	// Output:
 	//
 	// &ir.Module{
-	//     DataLayout:   "",
-	//     TargetTriple: "",
-	//     Types:        nil,
-	//     Globals:      {
+	//     TypeDefs: nil,
+	//     Globals:  {
 	//         &ir.Global{
-	//             Name: "seed",
-	//             Typ:  &types.PointerType{
-	//                 Name:      "",
-	//                 Elem:      &types.IntType{Name:"", Size:32},
-	//                 AddrSpace: 0,
-	//             },
-	//             Content: &types.IntType{Name:"", Size:32},
-	//             Init:    &constant.Int{
+	//             GlobalName:  "seed",
+	//             Immutable:   false,
+	//             ContentType: &types.IntType{Alias:"", BitSize:32},
+	//             Init:        &constant.Int{
 	//                 Typ: &types.IntType{(CYCLIC REFERENCE)},
 	//                 X:   &big.Int{},
 	//             },
-	//             IsConst:  false,
-	//             Metadata: {
+	//             Typ: &types.PointerType{
+	//                 Alias:     "",
+	//                 ElemType:  &types.IntType{(CYCLIC REFERENCE)},
+	//                 AddrSpace: 0,
 	//             },
+	//             Linkage:               0x0,
+	//             Preemption:            0x0,
+	//             Visibility:            0x0,
+	//             DLLStorageClass:       0x0,
+	//             TLSModel:              0x0,
+	//             UnnamedAddr:           0x0,
+	//             ExternallyInitialized: false,
+	//             Section:               "",
+	//             Comdat:                (*ir.ComdatDef)(nil),
+	//             Align:                 0,
+	//             FuncAttrs:             nil,
+	//             Metadata:              nil,
 	//         },
 	//     },
 	//     Funcs: {
 	//         &ir.Function{
-	//             Parent: &ir.Module{(CYCLIC REFERENCE)},
-	//             Name:   "abs",
-	//             Typ:    &types.PointerType{
-	//                 Name: "",
-	//                 Elem: &types.FuncType{
-	//                     Name:   "",
-	//                     Ret:    &types.IntType{Name:"", Size:32},
-	//                     Params: {
-	//                         &types.Param{
-	//                             Name: "x",
-	//                             Typ:  &types.IntType{Name:"", Size:32},
-	//                         },
-	//                     },
-	//                     Variadic: false,
-	//                 },
-	//                 AddrSpace: 0,
-	//             },
-	//             Sig: &types.FuncType{
-	//                 Name:   "",
-	//                 Ret:    &types.IntType{Name:"", Size:32},
-	//                 Params: {
-	//                     &types.Param{
-	//                         Name: "x",
-	//                         Typ:  &types.IntType{Name:"", Size:32},
-	//                     },
+	//             GlobalName: "abs",
+	//             Sig:        &types.FuncType{
+	//                 Alias:   "",
+	//                 RetType: &types.IntType{Alias:"", BitSize:32},
+	//                 Params:  {
+	//                     &types.IntType{Alias:"", BitSize:32},
 	//                 },
 	//                 Variadic: false,
 	//             },
-	//             CallConv: 0x0,
-	//             Blocks:   nil,
-	//             Metadata: {
+	//             Params: {
+	//                 &ir.Param{
+	//                     LocalName: "x",
+	//                     Typ:       &types.IntType{Alias:"", BitSize:32},
+	//                     Attrs:     nil,
+	//                 },
 	//             },
-	//             mu: sync.Mutex{},
+	//             Blocks: nil,
+	//             Typ:    &types.PointerType{
+	//                 Alias:     "",
+	//                 ElemType:  &types.FuncType{(CYCLIC REFERENCE)},
+	//                 AddrSpace: 0,
+	//             },
+	//             Linkage:         0x0,
+	//             Preemption:      0x0,
+	//             Visibility:      0x0,
+	//             DLLStorageClass: 0x0,
+	//             CallingConv:     0x0,
+	//             ReturnAttrs:     nil,
+	//             UnnamedAddr:     0x0,
+	//             FuncAttrs:       nil,
+	//             Section:         "",
+	//             Comdat:          (*ir.ComdatDef)(nil),
+	//             GC:              "",
+	//             Prefix:          nil,
+	//             Prologue:        nil,
+	//             Personality:     nil,
+	//             Metadata:        nil,
+	//             mu:              sync.Mutex{},
 	//         },
 	//         &ir.Function{
-	//             Parent: &ir.Module{(CYCLIC REFERENCE)},
-	//             Name:   "rand",
-	//             Typ:    &types.PointerType{
-	//                 Name: "",
-	//                 Elem: &types.FuncType{
-	//                     Name:   "",
-	//                     Ret:    &types.IntType{Name:"", Size:32},
-	//                     Params: {
-	//                     },
-	//                     Variadic: false,
-	//                 },
-	//                 AddrSpace: 0,
-	//             },
-	//             Sig: &types.FuncType{
-	//                 Name:   "",
-	//                 Ret:    &types.IntType{Name:"", Size:32},
-	//                 Params: {
-	//                 },
+	//             GlobalName: "rand",
+	//             Sig:        &types.FuncType{
+	//                 Alias:    "",
+	//                 RetType:  &types.IntType{Alias:"", BitSize:32},
+	//                 Params:   nil,
 	//                 Variadic: false,
 	//             },
-	//             CallConv: 0x0,
-	//             Blocks:   {
+	//             Params: nil,
+	//             Blocks: {
 	//                 &ir.BasicBlock{
-	//                     Parent: &ir.Function{(CYCLIC REFERENCE)},
-	//                     Name:   "0",
-	//                     Insts:  {
+	//                     LocalName: "0",
+	//                     Insts:     {
 	//                         &ir.InstLoad{
-	//                             Parent:   &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Name:     "1",
-	//                             Typ:      &types.IntType{(CYCLIC REFERENCE)},
-	//                             Src:      &ir.Global{(CYCLIC REFERENCE)},
-	//                             Metadata: {
-	//                             },
+	//                             LocalName: "1",
+	//                             Src:       &ir.Global{(CYCLIC REFERENCE)},
+	//                             Typ:       &types.IntType{Alias:"", BitSize:32},
+	//                             Atomic:    false,
+	//                             Volatile:  false,
+	//                             SyncScope: "",
+	//                             Ordering:  0x0,
+	//                             Align:     0,
+	//                             Metadata:  nil,
 	//                         },
 	//                         &ir.InstMul{
-	//                             Parent: &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Name:   "2",
-	//                             X:      &ir.InstLoad{(CYCLIC REFERENCE)},
-	//                             Y:      &constant.Int{
-	//                                 Typ: &types.IntType{Name:"", Size:32},
+	//                             LocalName: "2",
+	//                             X:         &ir.InstLoad{(CYCLIC REFERENCE)},
+	//                             Y:         &constant.Int{
+	//                                 Typ: &types.IntType{(CYCLIC REFERENCE)},
 	//                                 X:   &big.Int{
 	//                                     neg: false,
 	//                                     abs: {0x15a4e35},
 	//                                 },
 	//                             },
-	//                             Metadata: {
-	//                             },
+	//                             Typ:           &types.IntType{Alias:"", BitSize:32},
+	//                             OverflowFlags: nil,
+	//                             Metadata:      nil,
 	//                         },
 	//                         &ir.InstAdd{
-	//                             Parent: &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Name:   "3",
-	//                             X:      &ir.InstMul{(CYCLIC REFERENCE)},
-	//                             Y:      &constant.Int{
-	//                                 Typ: &types.IntType{Name:"", Size:32},
+	//                             LocalName: "3",
+	//                             X:         &ir.InstMul{(CYCLIC REFERENCE)},
+	//                             Y:         &constant.Int{
+	//                                 Typ: &types.IntType{(CYCLIC REFERENCE)},
 	//                                 X:   &big.Int{
 	//                                     neg: false,
 	//                                     abs: {0x1},
 	//                                 },
 	//                             },
-	//                             Metadata: {
-	//                             },
+	//                             Typ:           &types.IntType{Alias:"", BitSize:32},
+	//                             OverflowFlags: nil,
+	//                             Metadata:      nil,
 	//                         },
 	//                         &ir.InstStore{
-	//                             Parent:   &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Src:      &ir.InstAdd{(CYCLIC REFERENCE)},
-	//                             Dst:      &ir.Global{(CYCLIC REFERENCE)},
-	//                             Metadata: {
-	//                             },
+	//                             Src:       &ir.InstAdd{(CYCLIC REFERENCE)},
+	//                             Dst:       &ir.Global{(CYCLIC REFERENCE)},
+	//                             Atomic:    false,
+	//                             Volatile:  false,
+	//                             SyncScope: "",
+	//                             Ordering:  0x0,
+	//                             Align:     0,
+	//                             Metadata:  nil,
 	//                         },
 	//                         &ir.InstCall{
-	//                             Parent: &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Name:   "4",
-	//                             Callee: &ir.Function{(CYCLIC REFERENCE)},
-	//                             Sig:    &types.FuncType{(CYCLIC REFERENCE)},
-	//                             Args:   {
+	//                             LocalName: "4",
+	//                             Callee:    &ir.Function{(CYCLIC REFERENCE)},
+	//                             Args:      {
 	//                                 &ir.InstAdd{(CYCLIC REFERENCE)},
 	//                             },
-	//                             CallConv: 0x0,
-	//                             Metadata: {
-	//                             },
+	//                             Typ:            &types.IntType{Alias:"", BitSize:32},
+	//                             Tail:           0x0,
+	//                             FastMathFlags:  nil,
+	//                             CallingConv:    0x0,
+	//                             ReturnAttrs:    nil,
+	//                             AddrSpace:      0,
+	//                             FuncAttrs:      nil,
+	//                             OperandBundles: nil,
+	//                             Metadata:       nil,
 	//                         },
 	//                     },
 	//                     Term: &ir.TermRet{
-	//                         Parent: &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                         X:      &ir.InstCall{
-	//                             Parent: &ir.BasicBlock{(CYCLIC REFERENCE)},
-	//                             Name:   "4",
-	//                             Callee: &ir.Function{(CYCLIC REFERENCE)},
-	//                             Sig:    &types.FuncType{(CYCLIC REFERENCE)},
-	//                             Args:   {
+	//                         X:  &ir.InstCall{
+	//                             LocalName: "4",
+	//                             Callee:    &ir.Function{(CYCLIC REFERENCE)},
+	//                             Args:      {
 	//                                 &ir.InstAdd{(CYCLIC REFERENCE)},
 	//                             },
-	//                             CallConv: 0x0,
-	//                             Metadata: {
-	//                             },
+	//                             Typ:            &types.IntType{Alias:"", BitSize:32},
+	//                             Tail:           0x0,
+	//                             FastMathFlags:  nil,
+	//                             CallingConv:    0x0,
+	//                             ReturnAttrs:    nil,
+	//                             AddrSpace:      0,
+	//                             FuncAttrs:      nil,
+	//                             OperandBundles: nil,
+	//                             Metadata:       nil,
 	//                         },
-	//                         Metadata: {
-	//                         },
+	//                         Metadata: nil,
 	//                     },
 	//                 },
 	//             },
-	//             Metadata: {
+	//             Typ: &types.PointerType{
+	//                 Alias:     "",
+	//                 ElemType:  &types.FuncType{(CYCLIC REFERENCE)},
+	//                 AddrSpace: 0,
 	//             },
-	//             mu: sync.Mutex{},
+	//             Linkage:         0x0,
+	//             Preemption:      0x0,
+	//             Visibility:      0x0,
+	//             DLLStorageClass: 0x0,
+	//             CallingConv:     0x0,
+	//             ReturnAttrs:     nil,
+	//             UnnamedAddr:     0x0,
+	//             FuncAttrs:       nil,
+	//             Section:         "",
+	//             Comdat:          (*ir.ComdatDef)(nil),
+	//             GC:              "",
+	//             Prefix:          nil,
+	//             Prologue:        nil,
+	//             Personality:     nil,
+	//             Metadata:        nil,
+	//             mu:              sync.Mutex{},
 	//         },
 	//     },
-	//     NamedMetadata: nil,
-	//     Metadata:      nil,
+	//     SourceFilename:    "",
+	//     DataLayout:        "",
+	//     TargetTriple:      "",
+	//     ModuleAsms:        nil,
+	//     ComdatDefs:        nil,
+	//     Aliases:           nil,
+	//     IFuncs:            nil,
+	//     AttrGroupDefs:     nil,
+	//     NamedMetadataDefs: nil,
+	//     MetadataDefs:      nil,
+	//     UseListOrders:     nil,
+	//     UseListOrderBBs:   nil,
 	// }
 }

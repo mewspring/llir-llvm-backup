@@ -1,367 +1,323 @@
-// === [ Functions ] ===========================================================
-//
-// References:
-//    http://llvm.org/docs/LangRef.html#functions
-
 package ir
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/llir/llvm/internal/enc"
+	"github.com/llir/llvm/ir/constant"
+	"github.com/llir/llvm/ir/enum"
 	"github.com/llir/llvm/ir/metadata"
 	"github.com/llir/llvm/ir/types"
 	"github.com/llir/llvm/ir/value"
+	"github.com/pkg/errors"
 )
 
-// --- [ Functions ] -----------------------------------------------------------
+// === [ Functions ] ===========================================================
 
-// A Function represents an LLVM IR function definition or external function
-// declaration. The body of a function definition consists of a set of basic
-// blocks, interconnected by control flow instructions.
-//
-// Functions may be referenced from instructions (e.g. call), and are thus
-// considered LLVM IR values of function type.
+// Function is an LLVM IR function.
 type Function struct {
-	// Parent module of the function.
-	Parent *Module
-	// Function name.
-	Name string
-	// Function type.
-	Typ *types.PointerType
-	// Function type.
+	// Function name (without '@' prefix).
+	GlobalName string
+	// Function signature.
 	Sig *types.FuncType
-	// Calling convention.
-	CallConv CallConv
-	// Basic blocks of the function; or nil if defined externally.
-	Blocks []*BasicBlock
-	// Map from metadata identifier (e.g. !dbg) to metadata associated with the
-	// function.
-	Metadata map[string]*metadata.Metadata
-	// mu prevents races on assignIDs.
+	// Function parameters.
+	Params []*Param
+	// Basic blocks.
+	Blocks []*BasicBlock // nil if declaration.
+
+	// extra.
+
+	// Pointer type to function, including an optional address space. If Typ is
+	// nil, the first invocation of Type stores a pointer type with Sig as
+	// element.
+	Typ *types.PointerType
+	// (optional) Linkage.
+	Linkage enum.Linkage
+	// (optional) Preemption; zero value if not present.
+	Preemption enum.Preemption
+	// (optional) Visibility; zero value if not present.
+	Visibility enum.Visibility
+	// (optional) DLL storage class; zero value if not present.
+	DLLStorageClass enum.DLLStorageClass
+	// (optional) Calling convention; zero value if not present.
+	CallingConv enum.CallingConv
+	// (optional) Return attributes.
+	ReturnAttrs []ReturnAttribute
+	// (optional) Unnamed address.
+	UnnamedAddr enum.UnnamedAddr
+	// (optional) Function attributes.
+	FuncAttrs []FuncAttribute
+	// (optional) Section name; empty if not present.
+	Section string
+	// (optional) Comdat; nil if not present.
+	Comdat *ComdatDef
+	// (optional) Garbage collection; empty if not present.
+	GC string
+	// (optional) Prefix; nil if not present.
+	Prefix constant.Constant
+	// (optional) Prologue; nil if not present.
+	Prologue constant.Constant
+	// (optional) Personality; nil if not present.
+	Personality constant.Constant
+	// (optional) Use list orders.
+	// TODO: add support for UseListOrder.
+	//UseListOrders []*UseListOrder
+	// (optional) Metadata.
+	Metadata []*metadata.MetadataAttachment
+
+	// mu prevents races on AssignIDs.
 	mu sync.Mutex
 }
 
 // NewFunction returns a new function based on the given function name, return
-// type and parameters.
-func NewFunction(name string, ret types.Type, params ...*types.Param) *Function {
-	sig := types.NewFunc(ret, params...)
-	typ := types.NewPointer(sig)
-	return &Function{
-		Name:     name,
-		Typ:      typ,
-		Sig:      sig,
-		Metadata: make(map[string]*metadata.Metadata),
+// type and function parameters.
+func NewFunction(name string, retType types.Type, params ...*Param) *Function {
+	paramTypes := make([]types.Type, len(params))
+	for i, param := range params {
+		paramTypes[i] = param.Type()
 	}
+	sig := types.NewFunc(retType, paramTypes...)
+	f := &Function{GlobalName: name, Sig: sig, Params: params}
+	// Compute type.
+	f.Type()
+	return f
+}
+
+// String returns the LLVM syntax representation of the function as a type-value
+// pair.
+func (f *Function) String() string {
+	return fmt.Sprintf("%s %s", f.Type(), f.Ident())
 }
 
 // Type returns the type of the function.
 func (f *Function) Type() types.Type {
+	// Cache type if not present.
+	if f.Typ == nil {
+		f.Typ = types.NewPointer(f.Sig)
+	}
 	return f.Typ
 }
 
 // Ident returns the identifier associated with the function.
 func (f *Function) Ident() string {
-	return enc.Global(f.Name)
+	return enc.Global(f.GlobalName)
 }
 
-// GetName returns the name of the function.
-func (f *Function) GetName() string {
-	return f.Name
+// Name returns the name of the function.
+func (f *Function) Name() string {
+	return f.GlobalName
 }
 
 // SetName sets the name of the function.
 func (f *Function) SetName(name string) {
-	f.Name = name
+	f.GlobalName = name
 }
 
-// Immutable ensures that only constants can be assigned to the
-// constant.Constant interface.
-func (*Function) Immutable() {}
-
-// MetadataNode ensures that only metadata nodes can be assigned to the
-// metadata.Node interface.
-func (*Function) MetadataNode() {}
-
-// String returns the LLVM syntax representation of the function.
-func (f *Function) String() string {
-	// Assign unique local IDs to unnamed function parameters, basic blocks and
-	// local variables.
-	f.mu.Lock()
-	// using defer as assignIDs has been known to panic if any field is nil.
-	defer f.mu.Unlock()
-	assignIDs(f)
-
-	// Calling convention.
-	callconv := ""
-	if f.CallConv != CallConvNone {
-		callconv = fmt.Sprintf(" %s", f.CallConv)
-	}
-
-	// Function signature.
-	sig := &bytes.Buffer{}
-	fmt.Fprintf(sig, "%s %s(",
-		f.Sig.Ret,
-		f.Ident())
-	params := f.Params()
-	for i, param := range params {
-		if i != 0 {
-			sig.WriteString(", ")
-		}
-		// Use same output format as Clang. Don't output local ID for unnamed
-		// function parameters.
-		if len(param.Name) > 0 && !isLocalID(param.Name) {
-			fmt.Fprintf(sig, "%s %s",
-				param.Type(),
-				param.Ident())
-		} else {
-			sig.WriteString(param.Type().String())
-		}
-	}
-	if f.Sig.Variadic {
-		if len(params) > 0 {
-			sig.WriteString(", ")
-		}
-		sig.WriteString("...")
-	}
-	sig.WriteString(")")
-
-	// Metadata.
-	md := metadataString(f.Metadata, "")
-
+// Def returns the LLVM syntax representation of the function definition or
+// declaration.
+func (f *Function) Def() string {
+	// Function declaration.
+	//
+	//    'declare' Metadata=MetadataAttachment* Header=FuncHeader
+	//
 	// Function definition.
-	if len(f.Blocks) > 0 {
-		buf := &bytes.Buffer{}
-		fmt.Fprintf(buf, "define%s %s%s {\n", callconv, sig, md)
-		for _, block := range f.Blocks {
-			fmt.Fprintln(buf, block)
+	//
+	//    'define' Header=FuncHeader Metadata=MetadataAttachment* Body=FuncBody
+	buf := &strings.Builder{}
+	if len(f.Blocks) == 0 {
+		// Function declaration.
+		buf.WriteString("declare")
+		for _, md := range f.Metadata {
+			fmt.Fprintf(buf, " %s", md)
 		}
-		buf.WriteString("}")
+		if f.Linkage != enum.LinkageNone {
+			fmt.Fprintf(buf, " %s", f.Linkage)
+		}
+		buf.WriteString(headerString(f))
 		return buf.String()
 	}
-
-	// External function declaration.
-	return fmt.Sprintf("declare%s%s %s", md, callconv, sig)
+	// Function definition.
+	if err := f.AssignIDs(); err != nil {
+		panic(fmt.Errorf("unable to assign IDs of function %q; %v", f.Ident(), err))
+	}
+	buf.WriteString("define")
+	if f.Linkage != enum.LinkageNone {
+		fmt.Fprintf(buf, " %s", f.Linkage)
+	}
+	buf.WriteString(headerString(f))
+	for _, md := range f.Metadata {
+		fmt.Fprintf(buf, " %s", md)
+	}
+	fmt.Fprintf(buf, " %s", bodyString(f))
+	return buf.String()
 }
 
-// Params returns the parameters of the function.
-func (f *Function) Params() []*types.Param {
-	return f.Sig.Params
-}
-
-// AppendParam appends the given function parameter to the function.
-func (f *Function) AppendParam(param *types.Param) {
-	f.Sig.Params = append(f.Sig.Params, param)
-}
-
-// NewParam appends a new function parameter to the function based on the given
-// parameter name and type.
-func (f *Function) NewParam(name string, typ types.Type) *types.Param {
-	param := types.NewParam(name, typ)
-	f.AppendParam(param)
-	return param
-}
-
-// AppendBlock appends the given basic block to the function.
-func (f *Function) AppendBlock(block *BasicBlock) {
-	block.Parent = f
-	f.Blocks = append(f.Blocks, block)
-}
-
-// NewBlock appends a new basic block to the function based on the given label
-// name. An empty label name indicates an unnamed basic block.
-func (f *Function) NewBlock(name string) *BasicBlock {
-	block := NewBlock(name)
-	f.AppendBlock(block)
-	return block
-}
-
-// --- [ Function parameters ] -------------------------------------------------
-
-// NewParam returns a new function parameter based on the given parameter name
-// and type.
-func NewParam(name string, typ types.Type) *types.Param {
-	return types.NewParam(name, typ)
-}
-
-// ### [ Helper functions ] ####################################################
-
-// assignIDs assigns unique local IDs to unnamed basic blocks and local
-// variables of the function.
-func assignIDs(f *Function) {
+// AssignIDs assigns IDs to unnamed local variables.
+func (f *Function) AssignIDs() error {
+	if len(f.Blocks) == 0 {
+		return nil
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id := 0
 	names := make(map[string]value.Value)
-	setName := func(n value.Named) {
-		name := n.GetName()
-		switch {
-		case isUnnamed(name):
+	setName := func(n value.Named) error {
+		got := n.Name()
+		if isUnnamed(got) {
 			name := strconv.Itoa(id)
 			n.SetName(name)
 			names[name] = n
 			id++
-		case isLocalID(name):
+		} else if isLocalID(got) {
 			want := strconv.Itoa(id)
-			if name != want {
-				//pretty.Println("names:", names)
-				panic(fmt.Errorf("invalid local ID in function %s; expected %s, got %s\n\t`%v`", enc.Global(f.Name), enc.Local(want), enc.Local(name), n))
+			if want != got {
+				return errors.Errorf("invalid local ID in function %q, expected %s, got %s", enc.Global(f.GlobalName), enc.Local(want), enc.Local(got))
 			}
 			id++
+		} else {
+			// already named; nothing to do.
 		}
+		return nil
 	}
-	for _, param := range f.Params() {
+	for _, param := range f.Params {
 		// Assign local IDs to unnamed parameters of function definitions.
-		if len(f.Blocks) > 0 {
-			setName(param)
+		if err := setName(param); err != nil {
+			return errors.WithStack(err)
 		}
 	}
 	for _, block := range f.Blocks {
 		// Assign local IDs to unnamed basic blocks.
-		setName(block)
+		if err := setName(block); err != nil {
+			return errors.WithStack(err)
+		}
 		for _, inst := range block.Insts {
 			n, ok := inst.(value.Named)
 			if !ok {
 				continue
 			}
-			if n.Type().Equal(types.Void) {
+			// Skip void instructions.
+			// TODO: Check if any other value instructions than call may have void
+			// type.
+			if isVoidValue(n) {
 				continue
 			}
 			// Assign local IDs to unnamed local variables.
-			setName(n)
+			if err := setName(n); err != nil {
+				return errors.WithStack(err)
+			}
+		}
+		n, ok := block.Term.(value.Named)
+		if !ok {
+			continue
+		}
+		if isVoidValue(n) {
+			continue
+		}
+		if err := setName(n); err != nil {
+			return errors.WithStack(err)
 		}
 	}
+	return nil
 }
 
-// isUnnamed reports whether the given identifier is unnamed.
-func isUnnamed(name string) bool {
-	return len(name) == 0
-}
+// ### [ Helper functions ] ####################################################
 
-// isLocalID reports whether the given identifier is a local ID (e.g. "%42").
-func isLocalID(name string) bool {
-	for _, r := range name {
-		if strings.IndexRune("0123456789", r) == -1 {
-			return false
+// headerString returns the string representation of the function header.
+func headerString(f *Function) string {
+	// (Linkage | ExternLinkage)? Preemptionopt Visibilityopt DLLStorageClassopt
+	// CallingConvopt ReturnAttrs=ReturnAttribute* RetType=Type Name=GlobalIdent
+	// '(' Params ')' UnnamedAddropt AddrSpaceopt FuncAttrs=FuncAttribute*
+	// Sectionopt Comdatopt GCopt Prefixopt Prologueopt Personalityopt
+	buf := &strings.Builder{}
+	if f.Preemption != enum.PreemptionNone {
+		fmt.Fprintf(buf, " %s", f.Preemption)
+	}
+	if f.Visibility != enum.VisibilityNone {
+		fmt.Fprintf(buf, " %s", f.Visibility)
+	}
+	if f.DLLStorageClass != enum.DLLStorageClassNone {
+		fmt.Fprintf(buf, " %s", f.DLLStorageClass)
+	}
+	if f.CallingConv != enum.CallingConvNone {
+		fmt.Fprintf(buf, " %s", callingConvString(f.CallingConv))
+	}
+	for _, attr := range f.ReturnAttrs {
+		fmt.Fprintf(buf, " %s", attr)
+	}
+	fmt.Fprintf(buf, " %s", f.Sig.RetType)
+	fmt.Fprintf(buf, " %s(", enc.Global(f.GlobalName))
+	for i, param := range f.Params {
+		if i != 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString(param.Def())
+	}
+	if f.Sig.Variadic {
+		if len(f.Params) > 0 {
+			buf.WriteString(", ")
+		}
+		buf.WriteString("...")
+	}
+	buf.WriteString(")")
+	if f.UnnamedAddr != enum.UnnamedAddrNone {
+		fmt.Fprintf(buf, " %s", f.UnnamedAddr)
+	}
+	for _, attr := range f.FuncAttrs {
+		fmt.Fprintf(buf, " %s", attr)
+	}
+	if len(f.Section) > 0 {
+		fmt.Fprintf(buf, " section %s", enc.Quote([]byte(f.Section)))
+	}
+	if f.Comdat != nil {
+		if f.Comdat.Name == f.GlobalName {
+			buf.WriteString(" comdat")
+		} else {
+			fmt.Fprintf(buf, " %s", f.Comdat)
 		}
 	}
-	return len(name) > 0
-}
-
-// CallConv represents the set of calling conventions.
-type CallConv uint
-
-// TODO: Change calling convention enums to match the Haskell LLVM library.
-
-// Calling conventions.
-const (
-	CallConvNone           CallConv = iota // no calling convention specified.
-	CallConvAMDGPU_CS                      // amdgpu_cs
-	CallConvAMDGPU_GS                      // amdgpu_gs
-	CallConvAMDGPU_Kernel                  // amdgpu_kernel
-	CallConvAMDGPU_PS                      // amdgpu_ps
-	CallConvAMDGPU_VS                      // amdgpu_vs
-	CallConvAnyReg                         // anyregcc
-	CallConvARM_AAPCS                      // arm_aapcscc
-	CallConvARM_AAPCS_VFP                  // arm_aapcs_vfpcc
-	CallConvARM_APCS                       // arm_apcscc
-	CallConvAVR_Builtin                    // cc 86
-	CallConvAVR_Intr                       // avr_intrcc
-	CallConvAVR_Signal                     // avr_signalcc
-	CallConvC                              // ccc
-	CallConvCold                           // coldcc
-	CallConvCXX_Fast_TLS                   // cxx_fast_tlscc
-	CallConvFast                           // fastcc
-	CallConvGHC                            // ghccc
-	CallConvHHVM                           // hhvmcc
-	CallConvHHVM_C                         // hhvm_ccc
-	CallConvHiPE                           // cc 11
-	CallConvIntel_OCL_BI                   // intel_ocl_bicc
-	CallConvMSP430_Intr                    // msp430_intrcc
-	CallConvPreserveAll                    // preserve_allcc
-	CallConvPreserveMost                   // preserve_mostcc
-	CallConvPTX_Device                     // ptx_device
-	CallConvPTX_Kernel                     // ptx_kernel
-	CallConvSPIR_Func                      // spir_func
-	CallConvSPIR_Kernel                    // spir_kernel
-	CallConvSwift                          // swiftcc
-	CallConvWebKit_JS                      // webkit_jscc
-	CallConvX86_64_SysV                    // x86_64_sysvcc
-	CallConvX86_64_Win64                   // x86_64_win64cc
-	CallConvX86_FastCall                   // x86_fastcallcc
-	CallConvX86_Intr                       // x86_intrcc
-	CallConvX86_RegCall                    // x86_regcallcc
-	CallConvX86_StdCall                    // x86_stdcallcc
-	CallConvX86_ThisCall                   // x86_thiscallcc
-	CallConvX86_VectorCall                 // x86_vectorcallcc
-)
-
-// String returns the LLVM syntax representation of the calling convention.
-func (cc CallConv) String() string {
-	m := map[CallConv]string{
-		CallConvAMDGPU_CS:      "amdgpu_cs",
-		CallConvAMDGPU_GS:      "amdgpu_gs",
-		CallConvAMDGPU_Kernel:  "amdgpu_kernel",
-		CallConvAMDGPU_PS:      "amdgpu_ps",
-		CallConvAMDGPU_VS:      "amdgpu_vs",
-		CallConvAnyReg:         "anyregcc",
-		CallConvARM_AAPCS:      "arm_aapcscc",
-		CallConvARM_AAPCS_VFP:  "arm_aapcs_vfpcc",
-		CallConvARM_APCS:       "arm_apcscc",
-		CallConvAVR_Builtin:    "cc 86",
-		CallConvAVR_Intr:       "avr_intrcc",
-		CallConvAVR_Signal:     "avr_signalcc",
-		CallConvC:              "ccc",
-		CallConvCold:           "coldcc",
-		CallConvCXX_Fast_TLS:   "cxx_fast_tlscc",
-		CallConvFast:           "fastcc",
-		CallConvGHC:            "ghccc",
-		CallConvHHVM:           "hhvmcc",
-		CallConvHHVM_C:         "hhvm_ccc",
-		CallConvHiPE:           "cc 11",
-		CallConvIntel_OCL_BI:   "intel_ocl_bicc",
-		CallConvMSP430_Intr:    "msp430_intrcc",
-		CallConvPreserveAll:    "preserve_allcc",
-		CallConvPreserveMost:   "preserve_mostcc",
-		CallConvPTX_Device:     "ptx_device",
-		CallConvPTX_Kernel:     "ptx_kernel",
-		CallConvSPIR_Func:      "spir_func",
-		CallConvSPIR_Kernel:    "spir_kernel",
-		CallConvSwift:          "swiftcc",
-		CallConvWebKit_JS:      "webkit_jscc",
-		CallConvX86_64_SysV:    "x86_64_sysvcc",
-		CallConvX86_64_Win64:   "x86_64_win64cc",
-		CallConvX86_FastCall:   "x86_fastcallcc",
-		CallConvX86_Intr:       "x86_intrcc",
-		CallConvX86_RegCall:    "x86_regcallcc",
-		CallConvX86_StdCall:    "x86_stdcallcc",
-		CallConvX86_ThisCall:   "x86_thiscallcc",
-		CallConvX86_VectorCall: "x86_vectorcallcc",
+	if len(f.GC) > 0 {
+		fmt.Fprintf(buf, " gc %s", enc.Quote([]byte(f.GC)))
 	}
-	if s, ok := m[cc]; ok {
-		return s
+	if f.Prefix != nil {
+		fmt.Fprintf(buf, " prefix %s", f.Prefix)
 	}
-	return fmt.Sprintf("unknown calling convention %d", uint(cc))
+	if f.Prologue != nil {
+		fmt.Fprintf(buf, " prologue %s", f.Prologue)
+	}
+	if f.Personality != nil {
+		fmt.Fprintf(buf, " personality %s", f.Personality)
+	}
+	return buf.String()
 }
 
-// InlineAsm represents an inline assembly statement.
-type InlineAsm struct {
-	// Assembly instructions.
-	Asm string
-	// Comma-separated list of constraints.
-	Constraints string
-	// Function signature or return type of the inline assembly.
-	Typ types.Type
+// bodyString returns the string representation of the function body.
+func bodyString(body *Function) string {
+	// '{' Blocks=BasicBlock+ UseListOrders=UseListOrder* '}'
+	buf := &strings.Builder{}
+	buf.WriteString("{\n")
+	for i, block := range body.Blocks {
+		if i != 0 {
+			buf.WriteString("\n")
+		}
+		fmt.Fprintf(buf, "%s\n", block.Def())
+	}
+	// TODO: add support for use list orders.
+	//for _, useList := range body.UseListOrders {
+	//	fmt.Fprintf(buf, "%s\n", useList)
+	//}
+	buf.WriteString("}")
+	return buf.String()
 }
 
-// Type returns the type of the value.
-func (asm *InlineAsm) Type() types.Type {
-	return asm.Typ
-}
-
-// Ident returns the identifier associated with the value.
-func (asm *InlineAsm) Ident() string {
-	return fmt.Sprintf("asm %q, %q", asm.Asm, asm.Constraints)
+// isVoidValue reports whether the given named value is a non-value (i.e. a call
+// instruction or invoke terminator with void-return type).
+func isVoidValue(n value.Named) bool {
+	switch n.(type) {
+	case *InstCall, *TermInvoke:
+		return n.Type().Equal(types.Void)
+	}
+	return false
 }
