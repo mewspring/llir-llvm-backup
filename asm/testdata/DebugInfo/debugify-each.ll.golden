@@ -1,0 +1,8 @@
+define void @foo(i32 %arg) {
+	%1 = call i32 asm "bswap $0", "=r,r"(i32 %arg)
+	ret void
+}
+
+define void @bar() {
+	ret void
+}
