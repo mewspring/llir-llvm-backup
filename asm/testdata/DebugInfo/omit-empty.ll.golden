@@ -12,4 +12,4 @@
 !8 = distinct !DISubprogram(name: "f2", linkageName: "_Z2f2v", scope: !1, file: !1, line: 2, type: !9, isDefinition: true, scopeLine: 2, flags: DIFlagPrototyped, unit: !5, retainedNodes: !2)
 !9 = !DISubroutineType(types: !10)
 !10 = !{null}
-!11 = !DINamespace(name: "ns", scope: null)
+!11 = !DINamespace(scope: null, name: "ns")
