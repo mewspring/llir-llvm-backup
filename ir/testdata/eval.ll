@@ -33,6 +33,7 @@ define i32 @f(i32 %a, i32 %b) {
 }
 
 define i32 @main() {
+; <label>:0
 	%tmp1 = call i32 @add(i32 -1, i32 3)
 	%tmp2 = call i32 @sub(i32 13, i32 5)
 	%result = call i32 @f(i32 %tmp1, i32 %tmp2)
