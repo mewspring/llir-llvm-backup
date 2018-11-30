@@ -1,16 +1,19 @@
 @format = constant [6 x i8] c"%08X\0A\00"
 
 define i32 @add(i32 %a, i32 %b) {
+; <label>: 0
 	%result = add i32 %a, %b
 	ret i32 %result
 }
 
-define i32 @sub(i32 %a, i32 %b) {
-	%result = sub i32 %a, %b
+define i32 @sub(i32, i32) {
+; <label>: 2
+	%result = sub i32 %0, %1
 	ret i32 %result
 }
 
 define i32 @f(i32 %a, i32 %b) {
+; <label>: 0
 	%tmp1 = add i32 %a, %b
 	%tmp2 = sub i32 %tmp1, 1
 	%tmp3 = mul i32 %tmp2, 12345678
